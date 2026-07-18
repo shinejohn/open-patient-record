@@ -53,8 +53,14 @@ superseded Entry (FHIR `replaces` linkage / `Provenance`). Subject amendment req
 
 3.1 **Minting.** Only the Subject (or lawful delegate) may mint an AccessGrant. A
 grant MUST specify: grantee (organization, individual, or bearer), scope (FHIR resource
-types and/or record sections), permissions (`read`, `write`), expiry, and maximum uses.
-A grant MUST be serializable as a profiled FHIR `Consent` resource.
+types and/or record sections), permissions (`read`, `write`), **purpose**
+(`treatment`, `personal-share`, `research`, `emergency`, or `operations`), expiry, and
+maximum uses. A grant MUST be serializable as a profiled FHIR `Consent` resource.
+Research use of Vault content MUST be authorized by a grant with purpose `research`;
+a grant minted for one purpose MUST NOT be honored for another. Compensation or other
+commercial terms attached to research grants are out of scope of this specification
+but MUST NOT alter the protocol behaviors defined here (scoping, sensitive-category
+exclusion, revocation, audit).
 
 3.2 **Sensitive categories.** Entries tagged with a sensitive category (jurisdictional
 list; in the US at minimum: substance-use-disorder records under 42 CFR Part 2, mental
@@ -107,6 +113,16 @@ checking) until verified.
 
 4.4 The hash chain provides tamper *evidence*, not distributed consensus. This
 specification does not define, require, or endorse any blockchain mechanism.
+
+4.5 **Anchoring.** The hash chain alone cannot detect a custodian that rewrites and
+re-hashes an entire Vault's history. To close this, a Custodian MUST include the
+current chain-head hash in every export (§7.1) and in Subject-facing sync responses,
+so that Subject devices and exported copies serve as independent witnesses of chain
+continuity. A Custodian SHOULD additionally publish, at least daily, a signed digest
+committing to the chain heads of all hosted Vaults (e.g., a Merkle root) to a
+publicly auditable append-only location, such that no per-Vault information is
+disclosed. Conforming verification tools MUST treat a chain-head mismatch against a
+previously witnessed value as evidence of tampering.
 
 ## 5. Provenance
 
