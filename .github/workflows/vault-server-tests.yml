@@ -1,0 +1,44 @@
+name: vault-server tests
+
+on:
+  push:
+    branches: [main]
+    paths: ['reference-impl/**', '.github/workflows/vault-server-tests.yml']
+  pull_request:
+    paths: ['reference-impl/**', '.github/workflows/vault-server-tests.yml']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: opr_vault_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: reference-impl/server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_pgsql
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Run the conformance-seed suite (PostgreSQL)
+        run: ./vendor/bin/phpunit --no-coverage

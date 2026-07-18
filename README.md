@@ -3,9 +3,11 @@
 **An open standard for patient-owned health records: a custody layer over FHIR R4,
 with a reference implementation.**
 
-> Status: **v0.1 draft — pre-implementation.** The spec is being written in the open;
-> the reference implementation follows. Nothing here is stable yet. Issues and
-> discussion welcome.
+> Status: **v0.1 draft — spec published, vault server M1 running.** The custody core
+> (append-only hash-chained storage, AccessGrant protocol, sensitive-category
+> exclusion, audit, export with chain head) is implemented and enforced by 31 tests
+> against real PostgreSQL in CI. Nothing is stable until 1.0. Issues and discussion
+> welcome.
 
 ## The idea
 
@@ -60,6 +62,7 @@ That's the point.
 | [`reference-impl/`](reference-impl/) | Reference vault server + conformance test suite (in progress) | [Apache-2.0](LICENSE) |
 | [`docs/design/`](docs/design/) | Design rationale | Apache-2.0 |
 | [`GOVERNANCE.md`](GOVERNANCE.md) | How the spec changes, and the neutrality commitments | — |
+| [`GLOSSARY.md`](GLOSSARY.md) | Every term, defined in plain English | — |
 
 ## What's open and what isn't (said plainly)
 

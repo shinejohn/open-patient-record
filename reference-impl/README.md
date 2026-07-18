@@ -1,23 +1,65 @@
-# OPR Reference Implementation
+# OPR Vault Server — Reference Implementation
 
-**Status: not started — the spec draft precedes it deliberately.**
+The official open-source **vault server**: the software a custodian runs to host
+patients' individual vaults, implementing [`spec/custody-layer.md`](../spec/custody-layer.md).
+(Plain-English terms: [`GLOSSARY.md`](../GLOSSARY.md).)
 
-This directory will contain:
+**Status: M1 — the custody core works and is test-enforced.** 31 tests / 202
+assertions, run against real PostgreSQL in CI on every push.
 
-1. **The reference vault server** — a Full-conformance (Custodian + Contributor)
-   implementation of [`spec/custody-layer.md`](../spec/custody-layer.md):
-   FHIR R4 read surface, append-only hash-chained entry store, AccessGrant
-   mint/redeem/revoke, ShareSessions, audit, and the portability export/import pair.
-   Planned stack: PHP 8.3+ / Laravel / PostgreSQL (UUID keys, append-only enforcement
-   at the database layer — triggers, not app-code promises).
-2. **The conformance test suite** — the mechanical definition of "OPR Conformant" at
-   each level, runnable against *any* implementation over its public API (black-box:
-   HTTP in, assertions out). The round-trip portability test (spec §7.2) is the
-   suite's centerpiece and lands first.
+## What M1 implements
 
-Sequencing note: the suite is developed *with* the server, red-before-green — every
-normative MUST in the spec gets a failing test before the reference server makes it
-pass. A spec requirement with no test is treated as a spec bug.
+| Spec section | Implemented as |
+|---|---|
+| §2 custody model | One vault per subject; supersession (`replaces_entry_id`), never mutation; cross-vault supersession rejected |
+| §3 AccessGrants | Subject-only minting; purposes; scoped read/write; 8-digit one-time secret (hash stored, plaintext shown once); no-oracle redemption (identical failure payload, dummy-hash timing defense); max-uses + expiry under row lock; revocation kills derived tokens **immediately**; fail-closed everywhere |
+| §3.2 sensitive categories | Excluded from grants by default; explicit per-category opt-in; **unknown category = sensitive**, provably |
+| §4 integrity | Append-only via PG row triggers + TRUNCATE statement triggers + RESTRICT FKs + model guards; per-vault SHA-256 hash chain over canonicalized payloads; `verify` endpoint detects tampering (tested by literally disabling the trigger and rewriting history) |
+| §4.5 anchoring | Chain head in every entries/sync response and export |
+| §5 provenance | Mandatory on every commit (organization required) |
+| §6 audit | Append-only audit events for every access; denied redemptions record the true reason in audit only; subject reads their full access history free |
+| §7.1 export | Complete export: entries, provenance, audit, chain head |
 
-License: Apache-2.0 (repository [`LICENSE`](../LICENSE)). Contributions: DCO
-sign-off (`git commit -s`) — see [`GOVERNANCE.md`](../GOVERNANCE.md).
+## Not yet (M2+)
+
+FHIR REST read surface (`$everything`, per-resource), round-trip import (§7.2) and
+custodian migration (§7.3), the black-box conformance runner extracted from the test
+suite, ShareSessions, break-glass flow, per-patient envelope encryption, witness-log
+publishing, passkey auth.
+
+## Run it
+
+Requirements: PHP 8.3+, Composer, PostgreSQL 14+.
+
+```bash
+cd reference-impl/server
+composer install
+cp .env.example .env && php artisan key:generate
+createdb opr_vault          # dev database
+php artisan migrate
+php artisan serve           # API at http://localhost:8000/api
+```
+
+Tests (PostgreSQL required — the append-only triggers ARE the product; there is no
+sqlite mode by design):
+
+```bash
+createdb opr_vault_test
+./vendor/bin/phpunit        # defaults: postgres/postgres@127.0.0.1
+# or override: DB_USERNAME=$(whoami) DB_PASSWORD= ./vendor/bin/phpunit
+```
+
+## Design notes
+
+- **The database enforces the spec, not just the app.** UPDATE/DELETE/TRUNCATE on
+  committed entries or audit rows fail at the PostgreSQL layer even for buggy or
+  malicious application code. The tests prove tamper *detection* too: they disable
+  the trigger, rewrite history, and assert verification catches it.
+- **`DB_TIMEZONE=UTC` is load-bearing.** A non-UTC session timezone silently corrupts
+  `timestamptz` round-trips — grant expiry drifts by the UTC offset (a test caught
+  exactly this during development; it stays pinned in config).
+- **Every failure is fail-closed** and every redemption failure returns one identical
+  response; the true reason is recorded only in the vault's audit log, where the
+  subject can read it.
+- Contributions: DCO sign-off (`git commit -s`); tests must accompany any normative
+  behavior. A spec MUST without a test is treated as a bug.
