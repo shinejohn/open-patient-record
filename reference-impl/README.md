@@ -4,8 +4,8 @@ The official open-source **vault server**: the software a custodian runs to host
 patients' individual vaults, implementing [`spec/custody-layer.md`](../spec/custody-layer.md).
 (Plain-English terms: [`GLOSSARY.md`](../GLOSSARY.md).)
 
-**Status: M1 — the custody core works and is test-enforced.** 31 tests / 202
-assertions, run against real PostgreSQL in CI on every push.
+**Status: M2-in-progress — custody core + FHIR read surface, test-enforced.** 40
+tests / 268 assertions, run against real PostgreSQL in CI on every push.
 
 ## What M1 implements
 
@@ -19,12 +19,13 @@ assertions, run against real PostgreSQL in CI on every push.
 | §5 provenance | Mandatory on every commit (organization required) |
 | §6 audit | Append-only audit events for every access; denied redemptions record the true reason in audit only; subject reads their full access history free |
 | §7.1 export | Complete export: entries, provenance, audit, chain head |
+| FHIR R4 read surface | **Every vault is its own FHIR base URL** (`/api/fhir/{vault}`): `CapabilityStatement` at `/api/fhir/metadata`, `Patient/$everything`, type search, single-resource read. Verification tier rides `meta.tag` (`urn:opr:verification-tier`) so consumers can exclude `unverified-import` from decision support (§4.3). Current-view semantics (superseded entries excluded from searches; history stays in the export). Grant scope + sensitive filtering + audit apply identically; invisible = nonexistent (404, no oracle); mutation gets the §4.1 `OperationOutcome`. |
 
-## Not yet (M2+)
+## Not yet (M2 remainder +)
 
-FHIR REST read surface (`$everything`, per-resource), round-trip import (§7.2) and
-custodian migration (§7.3), the black-box conformance runner extracted from the test
-suite, ShareSessions, break-glass flow, per-patient envelope encryption, witness-log
+Round-trip import (§7.2) and custodian migration (§7.3), the black-box conformance
+runner extracted from the test suite, SMART-on-FHIR launch/scopes interop,
+ShareSessions, break-glass flow, per-patient envelope encryption, witness-log
 publishing, passkey auth.
 
 ## Run it

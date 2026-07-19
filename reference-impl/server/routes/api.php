@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\EntryController;
+use App\Http\Controllers\FhirController;
 use App\Http\Controllers\GrantController;
 use App\Http\Controllers\RedeemController;
 use App\Http\Controllers\VaultController;
@@ -29,4 +30,17 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::post('/vaults/{vault}/grants', [GrantController::class, 'store']);
     Route::post('/vaults/{vault}/grants/{grant}/revoke', [GrantController::class, 'revoke']);
+});
+
+// ------- FHIR R4 read surface: every vault is its own FHIR base URL -------
+
+// Server metadata is unauthenticated per FHIR convention (no PHI).
+Route::get('/fhir/metadata', [FhirController::class, 'metadata']);
+
+Route::middleware('auth:sanctum')->prefix('/fhir/{vault}')->group(function (): void {
+    Route::get('/Patient/$everything', [FhirController::class, 'everything']);
+    Route::get('/{type}', [FhirController::class, 'search']);
+    Route::get('/{type}/{id}', [FhirController::class, 'read']);
+    // Spec §4.1 applies on the FHIR surface too.
+    Route::match(['put', 'patch', 'delete'], '/{type}/{id}', [FhirController::class, 'reject']);
 });
