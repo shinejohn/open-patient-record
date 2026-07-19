@@ -4,8 +4,10 @@ The official open-source **vault server**: the software a custodian runs to host
 patients' individual vaults, implementing [`spec/custody-layer.md`](../spec/custody-layer.md).
 (Plain-English terms: [`GLOSSARY.md`](../GLOSSARY.md).)
 
-**Status: M2-in-progress — custody core + FHIR read surface, test-enforced.** 40
-tests / 268 assertions, run against real PostgreSQL in CI on every push.
+**Status: M2 complete.** 58 tests / 428 assertions against real PostgreSQL in CI,
+plus a black-box conformance runner ([`conformance/`](conformance/)) that the server
+passes over live HTTP: **16/16 MUST + 3/3 SHOULD → Custodian-conformant** (v0.1
+draft checks).
 
 ## What M1 implements
 
@@ -20,13 +22,18 @@ tests / 268 assertions, run against real PostgreSQL in CI on every push.
 | §6 audit | Append-only audit events for every access; denied redemptions record the true reason in audit only; subject reads their full access history free |
 | §7.1 export | Complete export: entries, provenance, audit, chain head |
 | FHIR R4 read surface | **Every vault is its own FHIR base URL** (`/api/fhir/{vault}`): `CapabilityStatement` at `/api/fhir/metadata`, `Patient/$everything`, type search, single-resource read. Verification tier rides `meta.tag` (`urn:opr:verification-tier`) so consumers can exclude `unverified-import` from decision support (§4.3). Current-view semantics (superseded entries excluded from searches; history stays in the export). Grant scope + sensitive filtering + audit apply identically; invisible = nonexistent (404, no oracle); mutation gets the §4.1 `OperationOutcome`. |
+| §7.2 round-trip import + §7.3 migration | `POST /vaults/{id}/import` of a complete export into an empty vault: every content + chain hash **recomputed, never trusted**; tamper-in-transit rejected atomically; replayed chain must land exactly on the source's terminal head — that equality is the anchor. Entry ids are custodian-scoped (like FHIR ids) and remapped; supersession links remap through; provenance preserved byte-for-byte. |
+| Envelope encryption | Per-vault 32-byte DEK (libsodium secretbox), wrapped by the master key (the KMS integration point). Ciphertext at rest — one leaked key exposes one vault; destroying a wrapped DEK after export crypto-shreds the local copy. Hashes computed over plaintext canonical form so integrity verifies on ANY custodian regardless of at-rest scheme. |
+| §3.6 ShareSessions | `POST /vaults/{id}/share-sessions` → `opr-share:v1:{handle}:{secret}` QR payload. Server-enforced: read-only, ≤60 min, single redemption. |
+| §3.7 break-glass | `POST /vaults/{id}/break-glass` — any authenticated user WITH a recorded substantive reason; accountability is the barrier, not a lock that stops the ER at 3am. Read-only, sensitive categories excluded, 60-min grant, `is_emergency`-flagged in the audit trail the subject reads, accessor identity recorded. |
+| §4.5 witness log | `php artisan opr:publish-witness` (schedule daily): ed25519-signed Merkle root over all vault chain heads → public `GET /api/witness-log` (roots only, zero PHI). Even the custodian can't rewrite history after publication without contradicting its own signature. |
+| Conformance runner | [`conformance/run.php`](conformance/run.php): dependency-free black-box checks against ANY implementation over HTTP. MUST failures fail the run; SHOULD checks report. |
 
-## Not yet (M2 remainder +)
+## Not yet (M3+)
 
-Round-trip import (§7.2) and custodian migration (§7.3), the black-box conformance
-runner extracted from the test suite, SMART-on-FHIR launch/scopes interop,
-ShareSessions, break-glass flow, per-patient envelope encryption, witness-log
-publishing, passkey auth.
+SMART-on-FHIR launch/scopes interop, Merkle inclusion proofs for the witness log,
+passkey auth, witness-key rotation rollover statements, Bulk FHIR `$export`
+streaming, delegation (guardians/proxies).
 
 ## Run it
 

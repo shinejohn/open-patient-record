@@ -48,6 +48,49 @@ final class GrantController
         ], 201);
     }
 
+    /** ShareSession (spec §3.6): the QR flow. Subject-only; constraints server-enforced. */
+    public function shareSession(Request $request, Vault $vault): JsonResponse
+    {
+        $this->assertSubject($request, $vault);
+
+        $data = $request->validate([
+            'scope' => ['sometimes', 'array', 'min:1'],
+            'scope.*' => ['string'],
+            'sensitive_categories' => ['sometimes', 'array'],
+            'sensitive_categories.*' => ['string'],
+            'expires_in_minutes' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $result = $this->grants->mintShareSession($vault, $request->user(), $data);
+
+        return response()->json([
+            'grant_id' => $result['grant']->id,
+            'share_code' => $result['share_code'], // QR content; shown exactly once
+            'expires_at' => $result['grant']->expires_at->toIso8601String(),
+        ], 201);
+    }
+
+    /**
+     * Break-glass (spec §3.7). Deliberately available to any AUTHENTICATED user
+     * with a recorded reason — that is how clinical break-glass works: the barrier
+     * is accountability (identity + reason + subject-visible audit), not a lock
+     * that also stops the ER at 3am.
+     */
+    public function breakGlass(Request $request, Vault $vault): JsonResponse
+    {
+        if ($this->isGrantToken($request)) {
+            abort(403, 'forbidden');
+        }
+
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'min:10', 'max:2000'],
+        ]);
+
+        $result = $this->grants->breakGlass($vault, $request->user(), $data['reason']);
+
+        return response()->json($result, 201);
+    }
+
     public function revoke(Request $request, Vault $vault, AccessGrant $grant): JsonResponse
     {
         $this->assertSubject($request, $vault);

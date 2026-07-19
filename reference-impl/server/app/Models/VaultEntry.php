@@ -32,11 +32,26 @@ final class VaultEntry extends Model
     protected function casts(): array
     {
         return [
-            'payload' => 'array',
             'provenance' => 'array',
             'seq' => 'integer',
             'created_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Payload is ciphertext at rest (per-vault envelope encryption); this accessor
+     * decrypts on read. The DEK is cached per vault, so a list of N entries costs
+     * one unwrap, not N.
+     *
+     * @return \Illuminate\Database\Eloquent\Casts\Attribute<array<mixed>|null, never>
+     */
+    protected function payload(): \Illuminate\Database\Eloquent\Casts\Attribute
+    {
+        return \Illuminate\Database\Eloquent\Casts\Attribute::make(
+            get: fn (?string $value): ?array => $value === null
+                ? null
+                : \App\Support\EnvelopeCrypto::decrypt($value, Vault::dekFor($this->vault_id)),
+        );
     }
 
     public function vault(): BelongsTo

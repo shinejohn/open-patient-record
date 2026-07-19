@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Vault;
 use App\Models\VaultEntry;
 use App\Support\Canonicalizer;
+use App\Support\EnvelopeCrypto;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -48,6 +49,8 @@ final class VaultService
                 }
             }
 
+            // Hashes are computed over the PLAINTEXT canonical form (portability:
+            // hashes must verify on any custodian, whatever its at-rest scheme).
             $contentHash = Canonicalizer::contentHash($data['payload']);
             $chainHash = Canonicalizer::chainHash($locked->chain_head_hash, $contentHash);
 
@@ -55,7 +58,7 @@ final class VaultService
                 'vault_id' => $locked->id,
                 'seq' => $locked->entry_count + 1,
                 'resource_type' => $data['resource_type'],
-                'payload' => $data['payload'],
+                'payload' => EnvelopeCrypto::encrypt($data['payload'], $locked->dek()),
                 'verification_tier' => $data['verification_tier'],
                 'sensitive_category' => $data['sensitive_category'] ?? null,
                 'replaces_entry_id' => $data['replaces_entry_id'] ?? null,

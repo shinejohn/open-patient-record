@@ -143,6 +143,81 @@ final class GrantService
     }
 
     /**
+     * ShareSession (spec §3.6): an AccessGrant constrained to read-only,
+     * pre-selected scope, lifetime ≤ 60 minutes, single redemption. The QR-at-
+     * check-in flow. Constraints are enforced HERE, not trusted from the caller.
+     *
+     * @param array{scope?: array<string>, sensitive_categories?: array<string>,
+     *              expires_in_minutes?: int} $data
+     * @return array{grant: AccessGrant, otp: string, share_code: string}
+     */
+    public function mintShareSession(Vault $vault, User $subject, array $data): array
+    {
+        $result = $this->mint($vault, $subject, [
+            'purpose' => 'personal-share',
+            'scope' => $data['scope'] ?? ['*'],
+            'permissions' => ['read'],                              // never write
+            'sensitive_categories' => $data['sensitive_categories'] ?? [],
+            'expires_in_minutes' => min($data['expires_in_minutes'] ?? 15, 60), // hard cap
+            'max_uses' => 1,                                        // single redemption
+        ]);
+
+        // The QR payload: everything the receiving device needs to redeem once.
+        $result['share_code'] = sprintf(
+            'opr-share:v1:%s:%s',
+            $result['grant']->pseudo_id,
+            $result['otp'],
+        );
+
+        return $result;
+    }
+
+    /**
+     * Break-glass (spec §3.7): emergency access WITHOUT the subject's participation.
+     * Requires recorded accessor identity + reason; excludes sensitive categories;
+     * short-lived; flagged is_emergency in the audit trail the subject can read.
+     * The token is issued directly — an emergency has no OTP hand-off step.
+     *
+     * @return array{token: string, expires_at: string, grant_id: string}
+     */
+    public function breakGlass(Vault $vault, User $accessor, string $reason): array
+    {
+        $grant = AccessGrant::query()->create([
+            'vault_id' => $vault->id,
+            'pseudo_id' => bin2hex(random_bytes(16)),
+            // Never OTP-redeemable: random hash no one holds the preimage of.
+            'otp_hash' => Hash::make(bin2hex(random_bytes(32))),
+            'purpose' => 'emergency',
+            'scope' => ['*'],
+            'permissions' => ['read'],
+            'sensitive_categories' => [],   // spec §3.7: sensitive excluded
+            'expires_at' => now()->addMinutes(60),
+            'max_uses' => 1,
+            'is_emergency' => true,
+            'emergency_reason' => $reason,
+        ]);
+        $grant->forceFill(['uses' => 1])->save();
+
+        $expiresAt = now()->addMinutes(self::TOKEN_TTL_MINUTES);
+        $token = $vault->subject->createToken(
+            "grant:{$grant->id}",
+            ["grant:{$grant->id}", "vault:{$vault->id}", 'purpose:emergency', 'read'],
+            $expiresAt,
+        );
+
+        $this->audit->record($vault, 'grant.emergency_access', actor: $accessor, grant: $grant, context: [
+            'accessor_user_id' => $accessor->id,
+            'accessor_name' => $accessor->name,
+        ], reason: $reason);
+
+        return [
+            'token' => $token->plainTextToken,
+            'expires_at' => $expiresAt->toIso8601String(),
+            'grant_id' => $grant->id,
+        ];
+    }
+
+    /**
      * Revoke (spec §3.4): refuse new redemptions immediately AND invalidate
      * outstanding derived tokens — this implementation deletes them, beating the
      * 5-minute bound with immediacy.

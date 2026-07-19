@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\EntryController;
 use App\Http\Controllers\FhirController;
+use App\Http\Controllers\ImportController;
 use App\Http\Controllers\GrantController;
 use App\Http\Controllers\RedeemController;
 use App\Http\Controllers\VaultController;
@@ -16,10 +17,16 @@ Route::post('/token', [AuthController::class, 'token'])->middleware('throttle:10
 // Unauthenticated by design; rate-limited; no-oracle failure semantics (spec §3.3).
 Route::post('/grants/redeem', RedeemController::class)->middleware('throttle:10,1');
 
+// Witness log (spec §4.5): public by design — Merkle roots over chain heads, no PHI.
+Route::get('/witness-log', fn () => response()->json([
+    'entries' => app(\App\Services\WitnessService::class)->log(),
+]))->middleware('throttle:60,1');
+
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/vaults', [VaultController::class, 'store']);
     Route::get('/vaults/{vault}', [VaultController::class, 'show']);
     Route::get('/vaults/{vault}/export', [VaultController::class, 'export']);
+    Route::post('/vaults/{vault}/import', [ImportController::class, 'store']);
     Route::get('/vaults/{vault}/verify', [VaultController::class, 'verify']);
     Route::get('/vaults/{vault}/audit', [VaultController::class, 'audit']);
 
@@ -30,6 +37,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::post('/vaults/{vault}/grants', [GrantController::class, 'store']);
     Route::post('/vaults/{vault}/grants/{grant}/revoke', [GrantController::class, 'revoke']);
+    Route::post('/vaults/{vault}/share-sessions', [GrantController::class, 'shareSession']);
+    Route::post('/vaults/{vault}/break-glass', [GrantController::class, 'breakGlass']);
 });
 
 // ------- FHIR R4 read surface: every vault is its own FHIR base URL -------
