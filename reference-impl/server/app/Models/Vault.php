@@ -77,8 +77,23 @@ final class Vault extends Model
         return $this->hasMany(AuditEvent::class)->orderBy('created_at');
     }
 
+    public function delegates(): HasMany
+    {
+        return $this->hasMany(VaultDelegate::class);
+    }
+
     public function isSubject(User $user): bool
     {
         return $this->subject_user_id === $user->id;
+    }
+
+    /** Subject-equivalent authority: the subject, or an active (unrevoked) delegate. */
+    public function actsFor(User $user): bool
+    {
+        return $this->isSubject($user)
+            || $this->delegates()
+                ->where('delegate_user_id', $user->id)
+                ->whereNull('revoked_at')
+                ->exists();
     }
 }

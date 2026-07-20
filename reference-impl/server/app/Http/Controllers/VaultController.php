@@ -74,6 +74,23 @@ final class VaultController
         return response()->json($result);
     }
 
+    /**
+     * Merkle inclusion proof for this vault against the latest published witness
+     * digest (spec §4.5): lets the subject verify — with only the PUBLIC log —
+     * that their vault's history is committed to by the custodian's signature.
+     */
+    public function witnessProof(Request $request, Vault $vault): JsonResponse
+    {
+        $this->assertSubject($request, $vault);
+
+        $proof = app(\App\Services\WitnessService::class)->proof($vault->id);
+        if ($proof === null) {
+            return response()->json(['error' => 'no_digest_covers_this_vault_yet'], 404);
+        }
+
+        return response()->json($proof);
+    }
+
     /** The subject's right to review all access, at no charge (spec §6). */
     public function audit(Request $request, Vault $vault): JsonResponse
     {

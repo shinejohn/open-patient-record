@@ -56,8 +56,23 @@ trait ResolvesGrantTokens
         return false;
     }
 
-    /** Subject access: the vault's owner, on a full (non-grant) token. */
+    /**
+     * Subject-equivalent access: the subject or an active delegate (guardian/
+     * proxy), on a full (non-grant) token. Audit rows still record the ACTUAL
+     * actor, so a delegate's actions are always attributable.
+     */
     protected function assertSubject(Request $request, Vault $vault): void
+    {
+        if ($this->isGrantToken($request) || ! $vault->actsFor($request->user())) {
+            abort(403, 'forbidden');
+        }
+    }
+
+    /**
+     * Strictly the subject — NOT delegates. Reserved for appointing/removing
+     * delegates: authority over who acts for the patient never delegates itself.
+     */
+    protected function assertOwner(Request $request, Vault $vault): void
     {
         if ($this->isGrantToken($request) || ! $vault->isSubject($request->user())) {
             abort(403, 'forbidden');

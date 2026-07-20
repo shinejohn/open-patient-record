@@ -98,7 +98,14 @@ final class VaultService
 
         foreach ($vault->entries()->cursor() as $entry) {
             $count++;
-            $expectedContent = Canonicalizer::contentHash($entry->payload);
+
+            try {
+                // An undecryptable/corrupt payload IS tamper evidence — report
+                // invalid at this entry rather than erroring out (fail-closed).
+                $expectedContent = Canonicalizer::contentHash($entry->payload);
+            } catch (\Throwable) {
+                $expectedContent = '<undecryptable>';
+            }
             $expectedChain = Canonicalizer::chainHash($previous, $expectedContent);
 
             if ($firstInvalid === null

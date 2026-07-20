@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DelegateController;
 use App\Http\Controllers\EntryController;
 use App\Http\Controllers\FhirController;
 use App\Http\Controllers\ImportController;
@@ -11,16 +12,18 @@ use App\Http\Controllers\RedeemController;
 use App\Http\Controllers\VaultController;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/users', [AuthController::class, 'register'])->middleware('throttle:10,1');
-Route::post('/token', [AuthController::class, 'token'])->middleware('throttle:10,1');
+// Distinct throttle buckets per route (3rd arg): unauthenticated throttles key by
+// IP, and a shared bucket would let activity on one endpoint starve another.
+Route::post('/users', [AuthController::class, 'register'])->middleware('throttle:10,1,register');
+Route::post('/token', [AuthController::class, 'token'])->middleware('throttle:10,1,login');
 
 // Unauthenticated by design; rate-limited; no-oracle failure semantics (spec §3.3).
-Route::post('/grants/redeem', RedeemController::class)->middleware('throttle:10,1');
+Route::post('/grants/redeem', RedeemController::class)->middleware('throttle:10,1,redeem');
 
 // Witness log (spec §4.5): public by design — Merkle roots over chain heads, no PHI.
 Route::get('/witness-log', fn () => response()->json([
     'entries' => app(\App\Services\WitnessService::class)->log(),
-]))->middleware('throttle:60,1');
+]))->middleware('throttle:60,1,witness');
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/vaults', [VaultController::class, 'store']);
@@ -39,6 +42,12 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/vaults/{vault}/grants/{grant}/revoke', [GrantController::class, 'revoke']);
     Route::post('/vaults/{vault}/share-sessions', [GrantController::class, 'shareSession']);
     Route::post('/vaults/{vault}/break-glass', [GrantController::class, 'breakGlass']);
+
+    Route::get('/vaults/{vault}/delegates', [DelegateController::class, 'index']);
+    Route::post('/vaults/{vault}/delegates', [DelegateController::class, 'store']);
+    Route::post('/vaults/{vault}/delegates/{delegate}/revoke', [DelegateController::class, 'revoke']);
+
+    Route::get('/vaults/{vault}/witness-proof', [VaultController::class, 'witnessProof']);
 });
 
 // ------- FHIR R4 read surface: every vault is its own FHIR base URL -------

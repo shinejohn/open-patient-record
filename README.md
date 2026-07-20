@@ -3,11 +3,13 @@
 **An open standard for patient-owned health records: a custody layer over FHIR R4,
 with a reference implementation.**
 
-> Status: **v0.1 draft — spec published, vault server M1 running.** The custody core
-> (append-only hash-chained storage, AccessGrant protocol, sensitive-category
-> exclusion, audit, export with chain head) is implemented and enforced by 31 tests
-> against real PostgreSQL in CI. Nothing is stable until 1.0. Issues and discussion
-> welcome.
+> Status: **v0.1 draft — spec published, vault server running and self-certified
+> conformant.** Custody core, grants, ShareSessions, break-glass, delegation,
+> envelope encryption, FHIR R4 read surface, portability round-trip with chain
+> anchoring, and a signed public witness log — enforced by 66 tests against real
+> PostgreSQL in CI, plus a black-box conformance runner (16/16 MUST + 3/3 SHOULD).
+> See [`ROADMAP.md`](ROADMAP.md) for honest status, and run the 5-minute live demo:
+> `cd reference-impl/demo && ./demo.sh`. Nothing is stable until 1.0.
 
 ## The idea
 
