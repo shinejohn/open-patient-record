@@ -7,7 +7,7 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 
 final class AuthController
 {
@@ -34,12 +34,16 @@ final class AuthController
             'password' => ['required', 'string'],
         ]);
 
-        if (! Auth::once($data)) {
+        $user = User::query()->where('email', $data['email'])->first();
+
+        // Exactly one hash check regardless of path (no account-existence oracle).
+        static $dummy = null;
+        $dummy ??= Hash::make(bin2hex(random_bytes(16)));
+        $valid = Hash::check($data['password'], $user->password ?? $dummy);
+
+        if ($user === null || ! $valid) {
             return response()->json(['error' => 'invalid_credentials'], 401);
         }
-
-        /** @var User $user */
-        $user = Auth::user();
 
         return response()->json(['token' => $user->createToken('full')->plainTextToken]);
     }

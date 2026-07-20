@@ -20,6 +20,17 @@ Route::post('/token', [AuthController::class, 'token'])->middleware('throttle:10
 // Unauthenticated by design; rate-limited; no-oracle failure semantics (spec §3.3).
 Route::post('/grants/redeem', RedeemController::class)->middleware('throttle:10,1,redeem');
 
+// Passkeys (WebAuthn) — login surfaces are unauthenticated, throttled, no-oracle.
+Route::post('/webauthn/login/options', [\App\Http\Controllers\WebAuthnController::class, 'loginOptions'])->middleware('throttle:20,1,pklogin');
+Route::post('/webauthn/login', [\App\Http\Controllers\WebAuthnController::class, 'login'])->middleware('throttle:20,1,pklogin');
+Route::post('/account/recover', [\App\Http\Controllers\RecoveryController::class, 'request'])->middleware('throttle:5,1,recover');
+Route::post('/account/recover/complete', [\App\Http\Controllers\RecoveryController::class, 'complete'])->middleware('throttle:5,1,recover');
+Route::middleware('auth:sanctum')->group(function (): void {
+    Route::post('/webauthn/register/options', [\App\Http\Controllers\WebAuthnController::class, 'registerOptions']);
+    Route::post('/webauthn/register', [\App\Http\Controllers\WebAuthnController::class, 'register']);
+    Route::post('/webauthn/credentials/{credential}/revoke', [\App\Http\Controllers\WebAuthnController::class, 'revoke']);
+});
+
 // Witness log (spec §4.5): public by design — Merkle roots over chain heads, no PHI.
 Route::get('/witness-log', fn () => response()->json([
     'entries' => app(\App\Services\WitnessService::class)->log(),

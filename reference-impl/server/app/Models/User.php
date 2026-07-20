@@ -33,4 +33,9 @@ final class User extends Authenticatable
     {
         return $this->hasOne(Vault::class, 'subject_user_id');
     }
+
+    public function credentials(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(UserCredential::class);
+    }
 }
