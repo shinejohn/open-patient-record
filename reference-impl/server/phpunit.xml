@@ -20,6 +20,9 @@
     <php>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <!-- Hermetic test key: tests must run with no .env (CI has none). This key
+             encrypts TEST data only and is deliberately committed. Never reuse. -->
+        <env name="APP_KEY" value="base64:ejMXHSb+osohaYjp0Gr7Alld8guDtNlYxAXdFQA0df8="/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>
         <env name="CACHE_STORE" value="array"/>
