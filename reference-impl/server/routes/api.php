@@ -57,6 +57,11 @@ Route::get('/fhir/metadata', [FhirController::class, 'metadata']);
 
 Route::middleware('auth:sanctum')->prefix('/fhir/{vault}')->group(function (): void {
     Route::get('/Patient/$everything', [FhirController::class, 'everything']);
+    // Bulk FHIR async pattern (subject/delegate only).
+    Route::get('/Patient/$export', [\App\Http\Controllers\BulkExportController::class, 'kickoff']);
+    Route::get('/$export-status/{job}', [\App\Http\Controllers\BulkExportController::class, 'status']);
+    Route::delete('/$export-status/{job}', [\App\Http\Controllers\BulkExportController::class, 'cancel']);
+    Route::get('/$export-file/{job}/{file}', [\App\Http\Controllers\BulkExportController::class, 'file']);
     Route::get('/{type}', [FhirController::class, 'search']);
     Route::get('/{type}/{id}', [FhirController::class, 'read']);
     // Spec §4.1 applies on the FHIR surface too.
