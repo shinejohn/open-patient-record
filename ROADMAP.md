@@ -32,13 +32,21 @@ black-box conformance runner. Everything you see is real HTTP against real code.
 | **Public witness** | Daily signed Merkle digest of all chain heads; per-vault inclusion proofs; dual-signed key-rotation rollover |
 | **Conformance runner** | Dependency-free black-box checks against ANY implementation; this server passes: 16/16 MUST + 3/3 SHOULD |
 
-## 🔨 In design / next to build (code exists for none of this yet)
+## 🔨 Planned — detailed build plans exist, code does not
 
-- **SMART-on-FHIR interop** — so existing health apps connect with standard launch/scopes
-- **Passkey authentication** for patient accounts
-- **Bulk FHIR `$export` streaming** for large vaults
-- **The open-source EHR application** around this record layer (charting UI, scheduling, intake, documents) — the largest remaining build, measured in months
-- **Legacy Gateway** (record ingestion from existing EHRs: C-CDA/document parsing, terminology normalization, clinician verification workflow) — specified in detail; deterministic-parse pipeline buildable now; AI-assisted extraction additionally gated by a signed model-vendor BAA
+- **Vault server M3** — [passkeys, Bulk FHIR `$export` streaming, SMART-on-FHIR
+  standalone launch](docs/plan/m3-smart-passkeys-bulk.md). Key design already
+  fixed: a SMART app authorization *is* an AccessGrant — one consent model, one
+  revocation model, one audit trail.
+- **The open-source EHR application** — [full plan](docs/plan/ehr-application.md):
+  separate app coupled to the vault by the public API only (the same-rails
+  commitment made structural), practice-ops DB for scheduling/billing/tasks,
+  milestones E1–E4 (~15 weeks), each ending in a runnable demo and an E2E script.
+- **Legacy Gateway** (record ingestion from existing EHRs) — product spec and
+  engineering plan complete (maintained privately; it's the commercial layer).
+  Deterministic-parse phase is buildable now with zero external dependencies;
+  AI-assisted extraction is additionally gated by a signed model-vendor BAA and
+  ships fail-closed OFF until then.
 
 ## 🤝 Requires partners/process — no code closes these
 
