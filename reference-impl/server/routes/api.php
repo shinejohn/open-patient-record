@@ -65,6 +65,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
 // Server metadata is unauthenticated per FHIR convention (no PHI).
 Route::get('/fhir/metadata', [FhirController::class, 'metadata']);
+// SMART discovery + id_token keys (public server metadata, no PHI).
+Route::get('/fhir/{vault}/.well-known/smart-configuration', [\App\Http\Controllers\SmartTokenController::class, 'smartConfiguration']);
+Route::get('/oauth/jwks', [\App\Http\Controllers\SmartTokenController::class, 'jwks']);
 
 Route::middleware('auth:sanctum')->prefix('/fhir/{vault}')->group(function (): void {
     Route::get('/Patient/$everything', [FhirController::class, 'everything']);

@@ -13,7 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // OAuth authorize POSTs are same-site, session-bound, and protected by
+        // state + PKCE; CSRF tokens would force clients to scrape our forms.
+        $middleware->validateCsrfTokens(except: ['oauth/*']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

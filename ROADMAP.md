@@ -16,7 +16,7 @@ sharing, break-glass, live tamper detection, full custodian migration with chain
 anchoring, the public witness log — then certifies the same server with the
 black-box conformance runner. Everything you see is real HTTP against real code.
 
-## ✅ Done (test-enforced; 66 tests / 509 assertions in CI + 19 black-box conformance checks)
+## ✅ Done (test-enforced; 88 tests / 723 assertions in CI + 19 black-box conformance checks)
 
 | Area | State |
 |---|---|
@@ -31,13 +31,12 @@ black-box conformance runner. Everything you see is real HTTP against real code.
 | **Portability** | Complete export; round-trip import with every hash recomputed; tamper-in-transit rejected atomically; custodian migration anchored on the source chain head |
 | **Public witness** | Daily signed Merkle digest of all chain heads; per-vault inclusion proofs; dual-signed key-rotation rollover |
 | **Conformance runner** | Dependency-free black-box checks against ANY implementation; this server passes: 16/16 MUST + 3/3 SHOULD |
+| **Bulk FHIR `$export`** | Async pattern, streamed ndjson + OPR metadata + chain head, memory-bounded, 24h expiry |
+| **Passkeys (WebAuthn)** | Passwordless auth, cloned-authenticator detection, no-oracle login + recovery |
+| **SMART on FHIR** | Standalone launch, auth-code+PKCE, RS256 id_token; a SMART authorization *is* an AccessGrant (one consent/revocation/audit model) |
 
 ## 🔨 Planned — detailed build plans exist, code does not
 
-- **Vault server M3** — [passkeys, Bulk FHIR `$export` streaming, SMART-on-FHIR
-  standalone launch](docs/plan/m3-smart-passkeys-bulk.md). Key design already
-  fixed: a SMART app authorization *is* an AccessGrant — one consent model, one
-  revocation model, one audit trail.
 - **The open-source EHR application** — [full plan](docs/plan/ehr-application.md):
   separate app coupled to the vault by the public API only (the same-rails
   commitment made structural), practice-ops DB for scheduling/billing/tasks,

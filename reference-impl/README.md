@@ -4,10 +4,10 @@ The official open-source **vault server**: the software a custodian runs to host
 patients' individual vaults, implementing [`spec/custody-layer.md`](../spec/custody-layer.md).
 (Plain-English terms: [`GLOSSARY.md`](../GLOSSARY.md).)
 
-**Status: M2 complete.** 58 tests / 428 assertions against real PostgreSQL in CI,
+**Status: M3 complete.** 88 tests / 723 assertions against real PostgreSQL in CI,
 plus a black-box conformance runner ([`conformance/`](conformance/)) that the server
 passes over live HTTP: **16/16 MUST + 3/3 SHOULD → Custodian-conformant** (v0.1
-draft checks).
+draft checks). M3 adds Bulk FHIR `$export`, passkeys, and SMART-on-FHIR.
 
 ## What M1 implements
 
@@ -28,12 +28,15 @@ draft checks).
 | §3.7 break-glass | `POST /vaults/{id}/break-glass` — any authenticated user WITH a recorded substantive reason; accountability is the barrier, not a lock that stops the ER at 3am. Read-only, sensitive categories excluded, 60-min grant, `is_emergency`-flagged in the audit trail the subject reads, accessor identity recorded. |
 | §4.5 witness log | `php artisan opr:publish-witness` (schedule daily): ed25519-signed Merkle root over all vault chain heads → public `GET /api/witness-log` (roots only, zero PHI). Even the custodian can't rewrite history after publication without contradicting its own signature. |
 | Conformance runner | [`conformance/run.php`](conformance/run.php): dependency-free black-box checks against ANY implementation over HTTP. MUST failures fail the run; SHOULD checks report. |
+| Bulk FHIR `$export` | FHIR Async Request pattern; streamed per-type ndjson + OPR metadata + chain head; memory-bounded; 24h expiry; subject/delegate only |
+| Passkeys (WebAuthn) | Passwordless auth via `web-auth/webauthn-lib`; single-use DB challenges; cloned-authenticator (sign-count regression) denial; no-oracle login + account recovery |
+| SMART on FHIR | Standalone launch, authorization-code + PKCE; **a SMART authorization is an AccessGrant** (one consent/revocation/audit model); read scopes v1/v2; sensitive categories default-off on the consent screen; RS256 id_token + JWKS; `.well-known/smart-configuration` |
 
-## Not yet (M3+)
+## Not yet (M4+)
 
-SMART-on-FHIR launch/scopes interop, Merkle inclusion proofs for the witness log,
-passkey auth, witness-key rotation rollover statements, Bulk FHIR `$export`
-streaming, delegation (guardians/proxies).
+EHR-launch context, SMART write scopes (arrive with the EHR app), backend-services
+(system) scopes for custodian-to-custodian, dynamic client registration, mailer
+integration for recovery/notifications, Merkle inclusion-proof CLI verifier.
 
 ## Run it
 
