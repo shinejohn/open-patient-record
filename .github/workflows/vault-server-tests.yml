@@ -31,9 +31,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # PHP version MUST match composer.json's config.platform.php — the lockfile
+      # resolves against that pin (Laravel 13 / Symfony 8 floor is PHP 8.4.1).
+      # Runtime drift between lockfile and CI is a known recurring failure mode.
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: '8.4'
           extensions: pdo_pgsql
           coverage: none
 

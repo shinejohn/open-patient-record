@@ -37,7 +37,9 @@ streaming, delegation (guardians/proxies).
 
 ## Run it
 
-Requirements: PHP 8.3+, Composer, PostgreSQL 14+.
+Requirements: PHP 8.4+, Composer, PostgreSQL 14+. (The Laravel 13 / Symfony 8
+dependency tree requires PHP ≥ 8.4.1; `composer.json` pins `config.platform.php`
+accordingly so dependency resolution is identical on every machine and in CI.)
 
 ```bash
 cd reference-impl/server
