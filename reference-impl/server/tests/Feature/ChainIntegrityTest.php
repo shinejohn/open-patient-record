@@ -98,6 +98,32 @@ final class ChainIntegrityTest extends TestCase
         $this->assertNotEmpty($export->json('audit_events'));
     }
 
+    public function test_full_provenance_is_preserved_not_truncated_to_organization(): void
+    {
+        // Regression: validate() with a nested provenance.organization rule used to
+        // strip every other provenance key (verifier, span, method) on commit.
+        $s = $this->subjectWithVault();
+        $this->commitEntry($s['token'], $s['vault_id'], [
+            'provenance' => [
+                'organization' => 'Riverside Clinic',
+                'source_system' => 'ccda-import',
+                'extraction_method' => 'structured-parse',
+                'source_span' => 'medication[0]',
+                'verifier_name' => 'Dr. Okafor',
+            ],
+        ])->assertCreated();
+
+        $prov = $this->withToken($s['token'])
+            ->getJson("/api/vaults/{$s['vault_id']}/export")
+            ->assertOk()
+            ->json('entries.0.provenance');
+
+        $this->assertSame('Riverside Clinic', $prov['organization']);
+        $this->assertSame('Dr. Okafor', $prov['verifier_name']);
+        $this->assertSame('structured-parse', $prov['extraction_method']);
+        $this->assertSame('medication[0]', $prov['source_span']);
+    }
+
     public function test_only_the_subject_can_export(): void
     {
         $s = $this->subjectWithVault();

@@ -1,0 +1,33 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "meta": { "source": "Apple Health" },
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "pt-1", "name": [{ "text": "Maria Alvarez" }] } },
+    { "resource": {
+        "resourceType": "Condition", "id": "c-1",
+        "meta": { "versionId": "9" },
+        "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "59621000", "display": "Essential hypertension" }], "text": "Essential hypertension" }
+    } },
+    { "resource": {
+        "resourceType": "MedicationStatement", "id": "m-1",
+        "status": "active",
+        "medicationCodeableConcept": { "coding": [{ "system": "http://www.nlm.nih.gov/research/umls/rxnorm", "code": "314076", "display": "Lisinopril 10 MG Oral Tablet" }], "text": "Lisinopril 10mg" }
+    } },
+    { "resource": {
+        "resourceType": "AllergyIntolerance", "id": "a-1",
+        "code": { "text": "Penicillin" }
+    } },
+    { "resource": {
+        "resourceType": "Immunization", "id": "i-1",
+        "status": "completed",
+        "vaccineCode": { "coding": [{ "system": "http://hl7.org/fhir/sid/cvx", "code": "158", "display": "Influenza" }] },
+        "occurrenceDateTime": "2025-10-01"
+    } },
+    { "resource": {
+        "resourceType": "MedicationStatement", "id": "m-2",
+        "status": "active",
+        "medicationCodeableConcept": { "text": "Buprenorphine/naloxone (recovery program)" }
+    } }
+  ]
+}

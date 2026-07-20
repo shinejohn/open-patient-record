@@ -35,6 +35,15 @@ black-box conformance runner. Everything you see is real HTTP against real code.
 | **Passkeys (WebAuthn)** | Passwordless auth, cloned-authenticator detection, no-oracle login + recovery |
 | **SMART on FHIR** | Standalone launch, auth-code+PKCE, RS256 id_token; a SMART authorization *is* an AccessGrant (one consent/revocation/audit model) |
 
+## ✅ Also done — Legacy Gateway G0 (deterministic ingestion)
+
+Runnable, test-enforced (14 tests / 82 assertions + a live end-to-end demo):
+FHIR-bundle and C-CDA parsers → human verification (medication reconciliation,
+completeness accounting, no silent drops) → commit into a vault via the public
+API. No AI, no BAAs. `cd gateway/demo && ./gateway-demo.sh` ingests a C-CDA and an
+Apple Health export into one patient's vault and proves the merged, verified,
+provenance-linked chart. AI narrative extraction (G1) is the next tier, BAA-gated.
+
 ## 🔨 Planned — detailed build plans exist, code does not
 
 - **The open-source EHR application** — [full plan](docs/plan/ehr-application.md):

@@ -61,8 +61,9 @@ That's the point.
 | Path | Contents | License |
 |---|---|---|
 | [`spec/`](spec/) | The standard: custody model, AccessGrant/ShareSession protocol, integrity + provenance + portability conformance | [CC0-1.0](spec/LICENSE) |
-| [`reference-impl/`](reference-impl/) | Reference vault server + conformance test suite (in progress) | [Apache-2.0](LICENSE) |
-| [`docs/design/`](docs/design/) | Design rationale | Apache-2.0 |
+| [`reference-impl/`](reference-impl/) | Reference vault server (M3 complete) + conformance runner | [Apache-2.0](LICENSE) |
+| [`gateway/`](gateway/) | Legacy Gateway G0 — deterministic ingestion of FHIR bundles + C-CDA into a vault | [Apache-2.0](LICENSE) |
+| [`docs/design/`](docs/design/) · [`docs/plan/`](docs/plan/) | Design rationale and build plans | Apache-2.0 |
 | [`GOVERNANCE.md`](GOVERNANCE.md) | How the spec changes, and the neutrality commitments | — |
 | [`GLOSSARY.md`](GLOSSARY.md) | Every term, defined in plain English | — |
 

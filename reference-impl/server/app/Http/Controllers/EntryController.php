@@ -68,6 +68,12 @@ final class EntryController
             'provenance.organization' => ['required', 'string'],
         ]);
 
+        // Laravel's validate() returns ONLY ruled keys, so a nested
+        // provenance.organization rule silently strips verifier, source span, and
+        // extraction method — losing spec §5 provenance. Keep the full submitted
+        // provenance (organization presence is already validated above).
+        $data['provenance'] = $request->input('provenance');
+
         $grant = $this->currentGrant($request);
 
         if ($grant === null) {

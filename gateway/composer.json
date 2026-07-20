@@ -1,0 +1,23 @@
+{
+    "name": "opr/gateway",
+    "description": "OPR Legacy Gateway G0 — deterministic ingestion of legacy health records (FHIR bundles, C-CDA) into an OPR vault, with human verification.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "require": {
+        "php": ">=8.4.1",
+        "ext-dom": "*",
+        "ext-libxml": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": { "Opr\\Gateway\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "Opr\\Gateway\\Tests\\": "tests/" }
+    },
+    "config": {
+        "platform": { "php": "8.4.1" }
+    }
+}
