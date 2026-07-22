@@ -4,6 +4,16 @@
 measured in months. The plan's job is to make it a sequence of demoable,
 test-enforced increments rather than a monolith that's "90% done" forever.*
 
+> **Scope revision (2026-07-22).** The **backend** of this plan — practice-ops APIs
+> (patients, scheduling, encounters/notes, documents, intake, cash-pay billing) —
+> is confirmed open-source and is tracked as milestone **F4** in the ROADMAP.
+> The **UI milestones in this document are superseded**: client applications are a
+> separate layer above the public APIs. Our own client is a commercial product;
+> anyone is free to build a client of their own against the same APIs, and the
+> APIs this plan defines are the contract both kinds of client get. E1–E4's
+> screen-level content should be read as *what a client needs the backend to
+> support*, not as a commitment to ship that UI here.
+
 ## What it is
 
 The practice-facing application built **around** the vault server: patients,

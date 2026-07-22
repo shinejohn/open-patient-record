@@ -30,6 +30,11 @@
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_PORT" value="5432"/>
         <env name="DB_DATABASE" value="opr_vault_test"/>
+        <!-- These defaults match CI (a postgres superuser). On a local machine whose
+             PostgreSQL uses your OS user (Homebrew default), override at the shell —
+             exported variables win over these values (force is false):
+                 createdb opr_vault_test
+                 DB_USERNAME=$(whoami) DB_PASSWORD= vendor/bin/phpunit -->
         <env name="DB_USERNAME" value="postgres"/>
         <env name="DB_PASSWORD" value="postgres"/>
         <env name="DB_URL" value=""/>
