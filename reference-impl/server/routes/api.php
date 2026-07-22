@@ -77,6 +77,8 @@ Route::middleware('auth:sanctum')->prefix('/fhir/{vault}')->group(function (): v
     Route::delete('/$export-status/{job}', [\App\Http\Controllers\BulkExportController::class, 'cancel']);
     Route::get('/$export-file/{job}/{file}', [\App\Http\Controllers\BulkExportController::class, 'file']);
     Route::get('/{type}', [FhirController::class, 'search']);
+    // F1: FHIR create — the strict door onto the one commit path.
+    Route::post('/{type}', [FhirController::class, 'create']);
     Route::get('/{type}/{id}', [FhirController::class, 'read']);
     // Spec §4.1 applies on the FHIR surface too.
     Route::match(['put', 'patch', 'delete'], '/{type}/{id}', [FhirController::class, 'reject']);

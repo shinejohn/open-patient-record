@@ -99,6 +99,101 @@ final class FhirController
         return response()->json($this->fhir->toResource($entry));
     }
 
+    /**
+     * POST /api/fhir/{vault}/{type} — FHIR create (F1).
+     *
+     * The strict door onto the one write path (VaultService::commitEntry): every
+     * FHIR create is hash-chained, audited, append-only, provenance-carrying.
+     *
+     * - Registry-supported types only; R4 required elements enforced.
+     * - Server assigns the id; client-asserted id/meta.versionId are ignored.
+     * - Tier derives from the actor: subject/delegate hand → unverified-import
+     *   (excluded from CDS until clinician-verified, spec §4.3); grant-holding
+     *   system → verified-source.
+     * - An incoming urn:opr:sensitive-category meta.tag becomes the entry's
+     *   sensitive_category; existing grant filtering applies on read.
+     * - Contributing organization: X-OPR-Organization header when present,
+     *   otherwise derived from the actor (grant handle / self-entry).
+     */
+    public function create(Request $request, Vault $vault, string $type): JsonResponse
+    {
+        $this->assertResourceType($type);
+
+        if (! \App\Services\FhirResourceRegistry::isSupported($type)) {
+            return response()->json($this->fhir->operationOutcome(
+                'not-supported',
+                "Resource type '{$type}' is not supported on this server. See /fhir/metadata for the supported set.",
+            ), 400);
+        }
+
+        $payload = $request->json()->all();
+        if (($payload['resourceType'] ?? null) !== $type) {
+            return response()->json($this->fhir->operationOutcome(
+                'invalid',
+                "Body resourceType must be '{$type}' to match the request URL.",
+            ), 400);
+        }
+
+        $missing = \App\Services\FhirResourceRegistry::missingElements($type, $payload);
+        if ($missing !== []) {
+            return response()->json([
+                'resourceType' => 'OperationOutcome',
+                'issue' => array_map(static fn (string $path): array => [
+                    'severity' => 'error',
+                    'code' => 'required',
+                    'diagnostics' => "Required element missing: {$path}",
+                    'expression' => [$path],
+                ], $missing),
+            ], 422);
+        }
+
+        // Authorization mirrors the native envelope path exactly.
+        $grant = $this->currentGrant($request);
+        if ($grant === null) {
+            $this->assertSubject($request, $vault);
+        } else {
+            $this->assertGrantCovers($request, $grant, $vault, 'write');
+            if (! $grant->coversResourceType($type)) {
+                abort(403, 'forbidden');
+            }
+        }
+
+        // Extract an incoming sensitive-category tag, then strip server-owned
+        // fields: id and meta are assigned/decorated by the server, never trusted.
+        $sensitiveCategory = null;
+        foreach ($payload['meta']['tag'] ?? [] as $tag) {
+            if (($tag['system'] ?? null) === FhirMapper::SENSITIVE_SYSTEM && isset($tag['code'])) {
+                $sensitiveCategory = (string) $tag['code'];
+            }
+        }
+        unset($payload['id'], $payload['meta']);
+
+        $organization = trim((string) $request->header('X-OPR-Organization', ''));
+        if ($organization === '') {
+            $organization = $grant === null ? 'self-entry' : 'grant:'.$grant->pseudo_id;
+        }
+
+        try {
+            $entry = $this->vaults->commitEntry($vault, $request->user(), [
+                'resource_type' => $type,
+                'payload' => $payload,
+                'verification_tier' => $grant === null ? 'unverified-import' : 'verified-source',
+                'sensitive_category' => $sensitiveCategory,
+                'provenance' => [
+                    'organization' => $organization,
+                    'author' => $request->user()->name,
+                    'source_system' => 'fhir-create',
+                ],
+            ], $grant);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json($this->fhir->operationOutcome('invalid', $e->getMessage()), 422);
+        }
+
+        return response()
+            ->json($this->fhir->toResource($entry), 201)
+            ->header('Location', url("/api/fhir/{$vault->id}/{$type}/{$entry->id}"));
+    }
+
     /** Spec §4.1 on the FHIR surface: committed content rejects mutation. */
     public function reject(): JsonResponse
     {

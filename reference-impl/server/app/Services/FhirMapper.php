@@ -100,11 +100,22 @@ final class FhirMapper
             ],
             'rest' => [[
                 'mode' => 'server',
-                'documentation' => 'Read-only. Access requires the vault subject\'s token or a '
-                    .'redeemed OPR AccessGrant token; scope and sensitive-category filtering '
-                    .'apply per grant. Entries tagged '.self::TIER_SYSTEM.'|unverified-import '
+                'documentation' => 'Access requires the vault subject\'s token or a redeemed OPR '
+                    .'AccessGrant token; scope and sensitive-category filtering apply per grant. '
+                    .'Create is supported per resource below (append-only: update/delete return '
+                    .'OperationOutcome per OPR spec §4.1; corrections are superseding entries). '
+                    .'Entries tagged '.self::TIER_SYSTEM.'|unverified-import '
                     .'MUST be excluded from clinical decision support (OPR spec §4.3).',
                 'interaction' => [['code' => 'search-system']],
+                'resource' => array_map(static fn (string $type): array => [
+                    'type' => $type,
+                    'versioning' => 'versioned',
+                    'interaction' => [
+                        ['code' => 'read'],
+                        ['code' => 'create'],
+                        ['code' => 'search-type'],
+                    ],
+                ], \App\Services\FhirResourceRegistry::types()),
             ]],
         ];
     }
