@@ -22,7 +22,7 @@ sharing, break-glass, live tamper detection, full custodian migration with chain
 anchoring, the public witness log — then certifies the same server with the
 black-box conformance runner. Everything you see is real HTTP against real code.
 
-## ✅ Done (test-enforced; 100 tests / 814 assertions in CI + 19 black-box conformance checks)
+## ✅ Done (test-enforced; server 131 tests / 1,007 assertions + gateway 23 / 114 + 19 black-box conformance checks)
 
 | Area | State |
 |---|---|
@@ -78,10 +78,10 @@ build their own against the same public APIs — which is the point.
 
 | Milestone | Contents |
 |---|---|
-| **F1 — FHIR layer becomes real** | ✅ *Landed 2026-07-22:* FHIR create (`POST /fhir/{vault}/{type}`) — 12 registry-supported types (incl. Encounter, Procedure, DocumentReference, CarePlan), R4 required/choice-element validation, server-assigned ids, actor-derived verification tier (subject → unverified-import, grant system → verified-source), sensitive-tag intake, provenance from the authenticated actor, CapabilityStatement now enumerates resources + interactions. Every FHIR write rides the one hash-chained commit path. **Remaining:** transaction Bundles, search parameters + pagination, real Patient demographics, US Core profile stamping |
-| **F2 — Terminology service** | RxNorm / LOINC / SNOMED CT / CVX / ICD-10 importers (NLM/CDC releases), `$validate-code`, `$lookup` |
-| **F3 — Gateway as one piece** | Gateway ships and deploys with the server; then **continuous sync + the write-side** — the live bridge that reads history from an incumbent EHR while all new data lands here, so replacement is a parallel run ended by archiving the incumbent in place, never a cutover |
-| **F4 — Practice-operations backend** | Scheduling, encounter workflow, cash-pay billing, tasks, intake — open, per the [EHR application plan](docs/plan/ehr-application.md)'s backend scope (its UI milestones are superseded: clients are a separate layer) |
+| **F1 — FHIR layer becomes real** | ✅ **Complete 2026-07-24.** Create (`POST /fhir/{vault}/{type}`, 12 registry-validated types, R4 required/choice elements, server-assigned ids, actor-derived tier); **search** (registry-declared token/reference/date params, comma-OR, date prefixes, `_id`/`_lastUpdated`, `_count`/`_offset` paging with self/next links, total = matches); **transaction/batch Bundles** (all-or-nothing proven — a valid entry does not survive an invalid sibling); **Patient demographics** (a committed Patient entry becomes the `$everything` anchor, supersession honored, vault id kept as the join point); **presence-level US Core stamping** (a profile URL is an earned claim; honest absence otherwise — explicitly not a binding/slicing validator). Every FHIR write rides the one hash-chained commit path. |
+| **F2 — Terminology service** | ✅ **Complete 2026-07-24.** `term_codes` storage; `CodeSystem/$lookup` + `$validate-code` (public, throttled, local-only — terminology resolution never causes egress); importers for the real release formats: CVX (CDC, public domain — seed subset ships in-repo), ICD-10-CM (CMS order file), LOINC (operator's licensed Loinc.csv — nothing ships in-repo), RxNorm (RXNCONSO.RRF, TTY-prioritized, suppressed rows excluded). SNOMED CT deliberately has no importer (UMLS licensing; codes on incoming resources are carried as-is). Unknown system = not-supported; known-but-unimported answers honestly. |
+| **F3 — Gateway continuous sync** | ✅ **Engine landed 2026-07-24.** `SyncEngine` + pluggable `FhirSource` + persisted state: classifies pulls as new/changed/unchanged/unresolved (content fingerprint excludes `meta`, so an incumbent's timestamp touch is not a change), changed resources become SUPERSEDING candidates, completeness accounting asserted (nothing silently dropped), sync never auto-commits — candidates still pass human med-rec sign-off. **Remaining:** a live HTTP `FhirSource` implementation, per-entry ids in `VaultClient::commit()`'s response for exact supersession tracking, and scheduled-run wiring. |
+| **F4 — Practice-operations backend** | 🔨 **Next.** Scheduling, encounter workflow, cash-pay billing, tasks, intake — open, per the [EHR application plan](docs/plan/ehr-application.md)'s backend scope (its UI milestones are superseded: clients are a separate layer) |
 
 ## 🔨 Planned — after F1–F4
 

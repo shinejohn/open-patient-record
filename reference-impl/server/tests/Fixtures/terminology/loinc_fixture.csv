@@ -1,0 +1,4 @@
+"LOINC_NUM","COMPONENT","PROPERTY","TIME_ASPCT","SYSTEM","SCALE_TYP","METHOD_TYP","CLASS","LONG_COMMON_NAME"
+"2339-0","Glucose","MCnc","Pt","Bld","Qn","","CHEM","Glucose [Mass/volume] in Blood"
+"718-7","Hemoglobin","MCnc","Pt","Bld","Qn","","HEM/BC","Hemoglobin [Mass/volume] in Blood"
+"8867-4","Heart rate","NRat","Pt","XXX","Qn","","HRTRATE.ATOM","Heart rate"

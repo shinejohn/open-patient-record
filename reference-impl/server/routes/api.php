@@ -65,6 +65,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
 // Server metadata is unauthenticated per FHIR convention (no PHI).
 Route::get('/fhir/metadata', [FhirController::class, 'metadata']);
+// F2: terminology operations — public (code systems carry no PHI), throttled.
+// MUST be registered before the /fhir/{vault} group or 'CodeSystem' would be
+// captured as a vault id.
+Route::get('/fhir/CodeSystem/$lookup', [\App\Http\Controllers\TerminologyController::class, 'lookup'])->middleware('throttle:60,1,term');
+Route::get('/fhir/CodeSystem/$validate-code', [\App\Http\Controllers\TerminologyController::class, 'validateCode'])->middleware('throttle:60,1,term');
 // SMART discovery + id_token keys (public server metadata, no PHI).
 Route::get('/fhir/{vault}/.well-known/smart-configuration', [\App\Http\Controllers\SmartTokenController::class, 'smartConfiguration']);
 Route::get('/oauth/jwks', [\App\Http\Controllers\SmartTokenController::class, 'jwks']);
