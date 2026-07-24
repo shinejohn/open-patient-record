@@ -44,6 +44,11 @@ final class Candidate
         public readonly array $provenance,
         public readonly ?string $sensitiveCategory = null,
         public readonly string $verificationTier = 'unverified-import',
+        // Set when this candidate SUPERSEDES a prior vault entry (continuous-sync
+        // "changed" classification) — VaultClient/commit uses this to chain the
+        // replacement rather than create an unrelated new entry. Null means a
+        // brand new fact, same as every existing G0 candidate.
+        public readonly ?string $replacesVaultEntryId = null,
     ) {
     }
 
