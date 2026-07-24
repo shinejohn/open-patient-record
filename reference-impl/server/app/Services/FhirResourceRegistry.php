@@ -52,9 +52,165 @@ final class FhirResourceRegistry
         'CarePlan' => ['required' => ['status', 'intent', 'subject'], 'choices' => []],
     ];
 
+    /**
+     * Search parameters per type: param => [type: token|reference|date, paths].
+     * Paths are dot-paths into the payload; a param may probe several (choice
+     * elements). Universal params (_id, _lastUpdated, _count, _offset) are
+     * handled by the engine directly.
+     *
+     * @var array<string, array<string, array{type: string, paths: list<string>}>>
+     */
+    private const SEARCH = [
+        'Condition' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'category' => ['type' => 'token', 'paths' => ['category.0']],
+            'clinical-status' => ['type' => 'token', 'paths' => ['clinicalStatus']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'onset-date' => ['type' => 'date', 'paths' => ['onsetDateTime', 'recordedDate']],
+        ],
+        'Observation' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'category' => ['type' => 'token', 'paths' => ['category.0']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'date' => ['type' => 'date', 'paths' => ['effectiveDateTime', 'effectivePeriod.start']],
+        ],
+        'MedicationStatement' => [
+            'code' => ['type' => 'token', 'paths' => ['medicationCodeableConcept']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'effective' => ['type' => 'date', 'paths' => ['effectiveDateTime', 'effectivePeriod.start']],
+        ],
+        'MedicationRequest' => [
+            'code' => ['type' => 'token', 'paths' => ['medicationCodeableConcept']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'intent' => ['type' => 'token', 'paths' => ['intent']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'authoredon' => ['type' => 'date', 'paths' => ['authoredOn']],
+        ],
+        'AllergyIntolerance' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'clinical-status' => ['type' => 'token', 'paths' => ['clinicalStatus']],
+            'patient' => ['type' => 'reference', 'paths' => ['patient']],
+            'date' => ['type' => 'date', 'paths' => ['recordedDate']],
+        ],
+        'Immunization' => [
+            'vaccine-code' => ['type' => 'token', 'paths' => ['vaccineCode']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'patient' => ['type' => 'reference', 'paths' => ['patient']],
+            'date' => ['type' => 'date', 'paths' => ['occurrenceDateTime']],
+        ],
+        'DiagnosticReport' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'category' => ['type' => 'token', 'paths' => ['category.0']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'date' => ['type' => 'date', 'paths' => ['effectiveDateTime', 'effectivePeriod.start']],
+        ],
+        'Procedure' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'date' => ['type' => 'date', 'paths' => ['performedDateTime', 'performedPeriod.start']],
+        ],
+        'Encounter' => [
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'class' => ['type' => 'token', 'paths' => ['class']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'date' => ['type' => 'date', 'paths' => ['period.start']],
+        ],
+        'DocumentReference' => [
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'category' => ['type' => 'token', 'paths' => ['category.0']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'date' => ['type' => 'date', 'paths' => ['date']],
+        ],
+        'CarePlan' => [
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'category' => ['type' => 'token', 'paths' => ['category.0']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'date' => ['type' => 'date', 'paths' => ['period.start']],
+        ],
+        'Patient' => [],
+    ];
+
     public static function isSupported(string $type): bool
     {
         return array_key_exists($type, self::REGISTRY);
+    }
+
+    /**
+     * US Core profile stamping — PRESENCE-level only, on purpose. A profile URL
+     * is claimed when (a) the type's base required elements validate and (b) the
+     * profile's additional must-have elements are present. This makes "this
+     * resource is US-Core-shaped" an earned claim without pretending to be a
+     * binding/slicing validator; a resource that doesn't qualify simply carries
+     * no profile — an honest absence, never a false badge. Observation is
+     * special-cased: the lab profile applies only to laboratory-category
+     * observations.
+     *
+     * @var array<string, array{url: string, extras: list<string>}>
+     */
+    private const US_CORE = [
+        'Patient' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient', 'extras' => ['name', 'gender']],
+        'Condition' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-condition', 'extras' => ['code', 'category']],
+        'AllergyIntolerance' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-allergyintolerance', 'extras' => ['code']],
+        'Immunization' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-immunization', 'extras' => []],
+        'MedicationRequest' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-medicationrequest', 'extras' => ['requester']],
+        'Procedure' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-procedure', 'extras' => ['code']],
+        'Encounter' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-encounter', 'extras' => ['type']],
+        'DiagnosticReport' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-diagnosticreport-lab', 'extras' => ['category']],
+        'DocumentReference' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-documentreference', 'extras' => ['type']],
+        'CarePlan' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-careplan', 'extras' => ['category']],
+    ];
+
+    /**
+     * The US Core profile URL this payload qualifies for, or null.
+     *
+     * @param array<string, mixed> $payload
+     */
+    public static function usCoreProfile(string $type, array $payload): ?string
+    {
+        if (self::missingElements($type, $payload) !== []) {
+            return null; // base shape not even satisfied — no claim
+        }
+
+        if ($type === 'Observation') {
+            foreach (($payload['category'] ?? []) as $category) {
+                foreach (($category['coding'] ?? []) as $coding) {
+                    if (($coding['code'] ?? null) === 'laboratory') {
+                        return 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-lab';
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        $def = self::US_CORE[$type] ?? null;
+        if ($def === null) {
+            return null;
+        }
+
+        foreach ($def['extras'] as $element) {
+            if (! array_key_exists($element, $payload) || $payload[$element] === null || $payload[$element] === []) {
+                return null;
+            }
+        }
+
+        return $def['url'];
+    }
+
+    /** @return array{type: string, paths: list<string>}|null */
+    public static function searchParam(string $type, string $param): ?array
+    {
+        return self::SEARCH[$type][$param] ?? null;
+    }
+
+    /** @return array<string, array{type: string, paths: list<string>}> */
+    public static function searchParams(string $type): array
+    {
+        return self::SEARCH[$type] ?? [];
     }
 
     /** @return list<string> */

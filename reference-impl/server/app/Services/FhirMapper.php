@@ -46,18 +46,34 @@ final class FhirMapper
             'tag' => $tags,
         ]);
 
+        // Presence-level US Core stamping (see FhirResourceRegistry::usCoreProfile).
+        $profile = FhirResourceRegistry::usCoreProfile($entry->resource_type, $entry->payload);
+        if ($profile !== null) {
+            $resource['meta']['profile'] = [$profile];
+        }
+
         return $resource;
     }
 
     /**
-     * Minimal Patient resource for the vault subject. The vault server is not
-     * demographics-authoritative in M2 — richer Patient data belongs in committed
-     * Patient entries; this synthesized resource is the anchor for $everything.
+     * The Patient anchor for $everything. When a committed Patient entry exists
+     * in the current view, its demographics ARE the anchor — the vault is
+     * demographics-authoritative the moment real data is contributed. The
+     * anchor always keeps the VAULT id: it is the join point every subject
+     * reference in the record points at. Without a committed entry, a minimal
+     * name-only Patient is synthesized from the account.
      *
+     * @param array<string, mixed>|null $demographics payload of the current-view Patient entry
      * @return array<string, mixed>
      */
-    public function subjectPatient(Vault $vault): array
+    public function subjectPatient(Vault $vault, ?array $demographics = null): array
     {
+        if ($demographics !== null) {
+            unset($demographics['id'], $demographics['meta']);
+
+            return ['resourceType' => 'Patient', 'id' => $vault->id] + $demographics;
+        }
+
         return [
             'resourceType' => 'Patient',
             'id' => $vault->id,
@@ -67,19 +83,26 @@ final class FhirMapper
 
     /**
      * @param list<array<string, mixed>> $resources
+     * @param list<array{relation: string, url: string}> $links
      * @return array<string, mixed>
      */
-    public function searchsetBundle(string $baseUrl, array $resources): array
+    public function searchsetBundle(string $baseUrl, array $resources, ?int $total = null, array $links = []): array
     {
-        return [
+        $bundle = [
             'resourceType' => 'Bundle',
             'type' => 'searchset',
-            'total' => count($resources),
+            // total = total MATCHES; entry = the returned page. Distinct on purpose.
+            'total' => $total ?? count($resources),
             'entry' => array_map(fn (array $r) => [
                 'fullUrl' => "{$baseUrl}/{$r['resourceType']}/{$r['id']}",
                 'resource' => $r,
             ], $resources),
         ];
+        if ($links !== []) {
+            $bundle['link'] = $links;
+        }
+
+        return $bundle;
     }
 
     /** @return array<string, mixed> */
@@ -107,15 +130,26 @@ final class FhirMapper
                     .'Entries tagged '.self::TIER_SYSTEM.'|unverified-import '
                     .'MUST be excluded from clinical decision support (OPR spec §4.3).',
                 'interaction' => [['code' => 'search-system']],
-                'resource' => array_map(static fn (string $type): array => [
-                    'type' => $type,
-                    'versioning' => 'versioned',
-                    'interaction' => [
-                        ['code' => 'read'],
-                        ['code' => 'create'],
-                        ['code' => 'search-type'],
-                    ],
-                ], \App\Services\FhirResourceRegistry::types()),
+                'resource' => array_map(static function (string $type): array {
+                    $searchParams = [
+                        ['name' => '_id', 'type' => 'token'],
+                        ['name' => '_lastUpdated', 'type' => 'date'],
+                    ];
+                    foreach (\App\Services\FhirResourceRegistry::searchParams($type) as $name => $def) {
+                        $searchParams[] = ['name' => $name, 'type' => $def['type']];
+                    }
+
+                    return [
+                        'type' => $type,
+                        'versioning' => 'versioned',
+                        'interaction' => [
+                            ['code' => 'read'],
+                            ['code' => 'create'],
+                            ['code' => 'search-type'],
+                        ],
+                        'searchParam' => $searchParams,
+                    ];
+                }, \App\Services\FhirResourceRegistry::types()),
             ]],
         ];
     }

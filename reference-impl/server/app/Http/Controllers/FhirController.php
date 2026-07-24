@@ -45,33 +45,70 @@ final class FhirController
     {
         $grant = $this->authorizeRead($request, $vault);
 
-        $resources = $this->currentView($vault, $grant)
-            ->get()
+        $entries = $this->currentView($vault, $grant)->get();
+
+        $resources = $entries
+            ->filter(fn (VaultEntry $e): bool => $e->resource_type !== 'Patient')
             ->map(fn (VaultEntry $e) => $this->fhir->toResource($e))
+            ->values()
             ->all();
 
-        array_unshift($resources, $this->fhir->subjectPatient($vault));
+        // A committed Patient entry (current view, newest) supplies the anchor's
+        // demographics; the anchor keeps the vault id as the join point.
+        $patientEntry = $entries
+            ->filter(fn (VaultEntry $e): bool => $e->resource_type === 'Patient')
+            ->sortByDesc('seq')
+            ->first();
+
+        array_unshift($resources, $this->fhir->subjectPatient($vault, $patientEntry?->payload));
 
         $this->auditRead($request, $vault, $grant, 'Patient/$everything', count($resources));
 
         return response()->json($this->fhir->searchsetBundle($this->baseUrl($vault), $resources));
     }
 
-    /** GET /api/fhir/{vault}/{type} — type-level search (current view). */
+    /**
+     * GET /api/fhir/{vault}/{type} — type-level search over the current view,
+     * with registry-declared parameters and _count/_offset pagination.
+     * `total` is the total match count; `entry` is the requested page.
+     */
     public function search(Request $request, Vault $vault, string $type): JsonResponse
     {
         $this->assertResourceType($type);
         $grant = $this->authorizeRead($request, $vault);
 
-        $resources = $this->currentView($vault, $grant)
+        $entries = $this->currentView($vault, $grant)
             ->where('resource_type', $type)
             ->get()
-            ->map(fn (VaultEntry $e) => $this->fhir->toResource($e))
             ->all();
+
+        $result = app(\App\Services\FhirSearchEngine::class)->apply($entries, $type, $request->query());
+        $total = count($result['matches']);
+
+        $count = max(1, min(100, (int) $request->query('_count', '50')));
+        $offset = max(0, (int) $request->query('_offset', '0'));
+        $page = array_slice($result['matches'], $offset, $count);
+
+        $resources = array_map(fn (VaultEntry $e) => $this->fhir->toResource($e), $page);
+
+        $base = "{$this->baseUrl($vault)}/{$type}";
+        $linkQuery = $result['applied'] + ['_count' => (string) $count];
+        $links = [[
+            'relation' => 'self',
+            'url' => $base.'?'.http_build_query($linkQuery + ['_offset' => (string) $offset]),
+        ]];
+        if ($offset + $count < $total) {
+            $links[] = [
+                'relation' => 'next',
+                'url' => $base.'?'.http_build_query($linkQuery + ['_offset' => (string) ($offset + $count)]),
+            ];
+        }
 
         $this->auditRead($request, $vault, $grant, $type, count($resources));
 
-        return response()->json($this->fhir->searchsetBundle($this->baseUrl($vault), $resources));
+        return response()->json(
+            $this->fhir->searchsetBundle($this->baseUrl($vault), $resources, $total, $links),
+        );
     }
 
     /** GET /api/fhir/{vault}/{type}/{id} — single resource read. */
@@ -119,14 +156,150 @@ final class FhirController
     {
         $this->assertResourceType($type);
 
-        if (! \App\Services\FhirResourceRegistry::isSupported($type)) {
+        $payload = $request->json()->all();
+        if (($error = $this->validateFhirResource($type, $payload)) !== null) {
+            return $error;
+        }
+
+        $grant = $this->authorizeFhirWrite($request, $vault, $type);
+
+        try {
+            $entry = $this->commitFhirResource($request, $vault, $grant, $type, $payload);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json($this->fhir->operationOutcome('invalid', $e->getMessage()), 422);
+        }
+
+        return response()
+            ->json($this->fhir->toResource($entry), 201)
+            ->header('Location', url("/api/fhir/{$vault->id}/{$type}/{$entry->id}"));
+    }
+
+    /**
+     * POST /api/fhir/{vault} — transaction and batch Bundles (F1).
+     *
+     * transaction = all-or-nothing: every entry is validated and authorized
+     * BEFORE anything commits, and the commits run inside one DB transaction —
+     * the chain never carries half a transaction. batch = independent entries,
+     * per-entry statuses. Only POST entries exist here: committed content is
+     * append-only, so PUT/DELETE entries are refused (spec §4.1).
+     */
+    public function bundle(Request $request, Vault $vault): JsonResponse
+    {
+        $body = $request->json()->all();
+        $mode = $body['type'] ?? null;
+        if (($body['resourceType'] ?? null) !== 'Bundle' || ! in_array($mode, ['transaction', 'batch'], true)) {
+            return response()->json($this->fhir->operationOutcome(
+                'invalid',
+                "Body must be a Bundle of type 'transaction' or 'batch'.",
+            ), 400);
+        }
+
+        // Normalize entries: [type, payload, error?]
+        $items = [];
+        foreach ($body['entry'] ?? [] as $entry) {
+            $method = strtoupper((string) ($entry['request']['method'] ?? ''));
+            $type = explode('/', (string) ($entry['request']['url'] ?? ''), 2)[0];
+            $payload = $entry['resource'] ?? [];
+
+            if ($method !== 'POST') {
+                $items[] = ['type' => $type, 'payload' => $payload, 'error' => response()->json(
+                    $this->fhir->operationOutcome(
+                        'business-rule',
+                        'Committed entries are append-only (OPR spec §4.1); only POST entries are accepted. Corrections are superseding entries.',
+                    ),
+                    405,
+                )];
+                continue;
+            }
+
+            $items[] = [
+                'type' => $type,
+                'payload' => $payload,
+                'error' => $this->validateFhirResource($type, is_array($payload) ? $payload : []),
+            ];
+        }
+
+        if ($mode === 'transaction') {
+            // Validate everything before touching the vault.
+            foreach ($items as $item) {
+                if ($item['error'] !== null) {
+                    return $item['error'];
+                }
+            }
+            foreach (array_unique(array_column($items, 'type')) as $type) {
+                $this->authorizeFhirWrite($request, $vault, $type); // aborts 403
+            }
+
+            $responses = \Illuminate\Support\Facades\DB::transaction(function () use ($request, $vault, $items): array {
+                $grant = $this->currentGrant($request);
+                $out = [];
+                foreach ($items as $item) {
+                    $entry = $this->commitFhirResource($request, $vault, $grant, $item['type'], $item['payload']);
+                    $out[] = [
+                        'response' => ['status' => '201 Created', 'location' => url("/api/fhir/{$vault->id}/{$item['type']}/{$entry->id}")],
+                        'resource' => $this->fhir->toResource($entry),
+                    ];
+                }
+
+                return $out;
+            });
+
+            return response()->json([
+                'resourceType' => 'Bundle',
+                'type' => 'transaction-response',
+                'entry' => $responses,
+            ]);
+        }
+
+        // batch — each entry stands alone.
+        $responses = [];
+        foreach ($items as $item) {
+            if ($item['error'] !== null) {
+                $responses[] = [
+                    'response' => ['status' => $item['error']->getStatusCode().' '.\Symfony\Component\HttpFoundation\Response::$statusTexts[$item['error']->getStatusCode()]],
+                    'resource' => $item['error']->getData(true),
+                ];
+                continue;
+            }
+
+            try {
+                $grant = $this->authorizeFhirWrite($request, $vault, $item['type']);
+                $entry = $this->commitFhirResource($request, $vault, $grant, $item['type'], $item['payload']);
+                $responses[] = [
+                    'response' => ['status' => '201 Created', 'location' => url("/api/fhir/{$vault->id}/{$item['type']}/{$entry->id}")],
+                    'resource' => $this->fhir->toResource($entry),
+                ];
+            } catch (\Symfony\Component\HttpKernel\Exception\HttpException $e) {
+                $responses[] = [
+                    'response' => ['status' => $e->getStatusCode().' '.\Symfony\Component\HttpFoundation\Response::$statusTexts[$e->getStatusCode()]],
+                    'resource' => $this->fhir->operationOutcome('forbidden', 'Not authorized for this entry.'),
+                ];
+            } catch (\InvalidArgumentException $e) {
+                $responses[] = [
+                    'response' => ['status' => '422 Unprocessable Entity'],
+                    'resource' => $this->fhir->operationOutcome('invalid', $e->getMessage()),
+                ];
+            }
+        }
+
+        return response()->json([
+            'resourceType' => 'Bundle',
+            'type' => 'batch-response',
+            'entry' => $responses,
+        ]);
+    }
+
+    /** Registry + structural validation shared by create() and bundle(). */
+    private function validateFhirResource(string $type, array $payload): ?JsonResponse
+    {
+        if (preg_match('/\A[A-Z][A-Za-z0-9]{0,63}\z/', $type) !== 1
+            || ! \App\Services\FhirResourceRegistry::isSupported($type)) {
             return response()->json($this->fhir->operationOutcome(
                 'not-supported',
                 "Resource type '{$type}' is not supported on this server. See /fhir/metadata for the supported set.",
             ), 400);
         }
 
-        $payload = $request->json()->all();
         if (($payload['resourceType'] ?? null) !== $type) {
             return response()->json($this->fhir->operationOutcome(
                 'invalid',
@@ -147,7 +320,12 @@ final class FhirController
             ], 422);
         }
 
-        // Authorization mirrors the native envelope path exactly.
+        return null;
+    }
+
+    /** Authorization mirrors the native envelope path exactly. Aborts 403. */
+    private function authorizeFhirWrite(Request $request, Vault $vault, string $type): ?AccessGrant
+    {
         $grant = $this->currentGrant($request);
         if ($grant === null) {
             $this->assertSubject($request, $vault);
@@ -158,8 +336,19 @@ final class FhirController
             }
         }
 
-        // Extract an incoming sensitive-category tag, then strip server-owned
-        // fields: id and meta are assigned/decorated by the server, never trusted.
+        return $grant;
+    }
+
+    /**
+     * The one FHIR-door commit: sensitive-tag intake, server-owned field
+     * stripping, actor-derived tier and organization, then commitEntry — so
+     * every FHIR write (single or bundled) is hash-chained, audited, and
+     * provenance-carrying identically.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function commitFhirResource(Request $request, Vault $vault, ?AccessGrant $grant, string $type, array $payload): VaultEntry
+    {
         $sensitiveCategory = null;
         foreach ($payload['meta']['tag'] ?? [] as $tag) {
             if (($tag['system'] ?? null) === FhirMapper::SENSITIVE_SYSTEM && isset($tag['code'])) {
@@ -173,25 +362,17 @@ final class FhirController
             $organization = $grant === null ? 'self-entry' : 'grant:'.$grant->pseudo_id;
         }
 
-        try {
-            $entry = $this->vaults->commitEntry($vault, $request->user(), [
-                'resource_type' => $type,
-                'payload' => $payload,
-                'verification_tier' => $grant === null ? 'unverified-import' : 'verified-source',
-                'sensitive_category' => $sensitiveCategory,
-                'provenance' => [
-                    'organization' => $organization,
-                    'author' => $request->user()->name,
-                    'source_system' => 'fhir-create',
-                ],
-            ], $grant);
-        } catch (\InvalidArgumentException $e) {
-            return response()->json($this->fhir->operationOutcome('invalid', $e->getMessage()), 422);
-        }
-
-        return response()
-            ->json($this->fhir->toResource($entry), 201)
-            ->header('Location', url("/api/fhir/{$vault->id}/{$type}/{$entry->id}"));
+        return $this->vaults->commitEntry($vault, $request->user(), [
+            'resource_type' => $type,
+            'payload' => $payload,
+            'verification_tier' => $grant === null ? 'unverified-import' : 'verified-source',
+            'sensitive_category' => $sensitiveCategory,
+            'provenance' => [
+                'organization' => $organization,
+                'author' => $request->user()->name,
+                'source_system' => 'fhir-create',
+            ],
+        ], $grant);
     }
 
     /** Spec §4.1 on the FHIR surface: committed content rejects mutation. */

@@ -76,6 +76,8 @@ Route::middleware('auth:sanctum')->prefix('/fhir/{vault}')->group(function (): v
     Route::get('/$export-status/{job}', [\App\Http\Controllers\BulkExportController::class, 'status']);
     Route::delete('/$export-status/{job}', [\App\Http\Controllers\BulkExportController::class, 'cancel']);
     Route::get('/$export-file/{job}/{file}', [\App\Http\Controllers\BulkExportController::class, 'file']);
+    // F1: transaction/batch Bundles at the vault's FHIR base.
+    Route::post('', [FhirController::class, 'bundle']);
     Route::get('/{type}', [FhirController::class, 'search']);
     // F1: FHIR create — the strict door onto the one commit path.
     Route::post('/{type}', [FhirController::class, 'create']);
