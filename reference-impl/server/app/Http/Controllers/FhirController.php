@@ -55,12 +55,23 @@ final class FhirController
 
         // A committed Patient entry (current view, newest) supplies the anchor's
         // demographics; the anchor keeps the vault id as the join point.
-        $patientEntry = $entries
-            ->filter(fn (VaultEntry $e): bool => $e->resource_type === 'Patient')
-            ->sortByDesc('seq')
-            ->first();
+        //
+        // SCOPE GUARD (found by adversarial review): a grant whose scope excludes
+        // Patient must NOT receive demographics — not even the account name the
+        // synthesized anchor used to carry. Such grants get {resourceType, id}
+        // only; the id is already in the request URL, so nothing new is
+        // disclosed. Regression: FhirDemographicsAndProfilesTest.
+        if ($grant !== null && ! $grant->coversResourceType('Patient')) {
+            $anchor = ['resourceType' => 'Patient', 'id' => $vault->id];
+        } else {
+            $patientEntry = $entries
+                ->filter(fn (VaultEntry $e): bool => $e->resource_type === 'Patient')
+                ->sortByDesc('seq')
+                ->first();
+            $anchor = $this->fhir->subjectPatient($vault, $patientEntry?->payload);
+        }
 
-        array_unshift($resources, $this->fhir->subjectPatient($vault, $patientEntry?->payload));
+        array_unshift($resources, $anchor);
 
         $this->auditRead($request, $vault, $grant, 'Patient/$everything', count($resources));
 

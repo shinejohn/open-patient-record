@@ -22,7 +22,7 @@ sharing, break-glass, live tamper detection, full custodian migration with chain
 anchoring, the public witness log — then certifies the same server with the
 black-box conformance runner. Everything you see is real HTTP against real code.
 
-## ✅ Done (test-enforced; server 131 tests / 1,007 assertions + gateway 23 / 114 + 19 black-box conformance checks)
+## ✅ Done (test-enforced; server 134 / 1,032 + gateway 25 / 117 + ehr 14 / 57 + 19 black-box conformance checks)
 
 | Area | State |
 |---|---|

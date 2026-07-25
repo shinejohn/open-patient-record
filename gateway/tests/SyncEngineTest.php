@@ -212,4 +212,51 @@ final class SyncEngineTest extends TestCase
         $this->assertSame(SyncEngine::fingerprint($a), SyncEngine::fingerprint($b));
         $this->assertNotSame(SyncEngine::fingerprint($a), SyncEngine::fingerprint($c));
     }
+
+    public function test_checkpoint_is_the_pull_start_time_not_completion_time(): void
+    {
+        // CRITICAL review finding: recording the checkpoint AFTER processing
+        // permanently loses any resource the incumbent updates mid-run when the
+        // source honors $since. The checkpoint must be the pull START.
+        $clock = ['2026-01-01T00:00:00+00:00', '2026-01-01T00:10:00+00:00'];
+        $i = 0;
+        $engine = new SyncEngine(
+            new ArrayFhirSource([]),
+            $store = new JsonFileSyncStateStore($this->stateFile),
+            'src-1',
+            function () use (&$clock, &$i): string { return $clock[min($i++, count($clock) - 1)]; },
+        );
+
+        $engine->pull(['Condition']); // clock tick 1: 00:00 — the start
+        $engine->markPulled();        // no arg: must use the captured START time
+
+        $this->assertSame('2026-01-01T00:00:00+00:00', $store->lastPulledAt('src-1'));
+    }
+
+    public function test_sign_off_carries_replaces_entry_id_for_changed_resources(): void
+    {
+        $store = new JsonFileSyncStateStore($this->stateFile);
+        $store->put('src-1', 'Condition/c1', '1', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'stale-fingerprint');
+
+        $engine = new SyncEngine(new ArrayFhirSource([
+            ['resourceType' => 'Condition', 'id' => 'c1', 'code' => ['text' => 'changed'], 'subject' => ['reference' => 'Patient/p']],
+        ]), $store, 'src-1');
+
+        $plan = $engine->pull(['Condition']);
+        $candidates = $engine->toCandidates($plan);
+        $this->assertCount(1, $candidates);
+
+        $result = new \Opr\Gateway\IngestionResult();
+        $result->classification = 'fhir-sync';
+        foreach ($candidates as $c) { $result->add($c); }
+        $verification = new \Opr\Gateway\Verification($result);
+        $verification->acceptAllDeterministic();
+        $entries = $verification->signOff('ver-1', 'Dr. Verifier');
+
+        $this->assertSame(
+            'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+            $entries[0]['replaces_entry_id'] ?? null,
+            'a CHANGED resource must supersede its prior vault entry at sign-off',
+        );
+    }
 }

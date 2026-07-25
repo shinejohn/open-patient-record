@@ -126,6 +126,23 @@ final class FhirSearchTest extends TestCase
         $this->assertSame(1, $eq->json('total'));
     }
 
+    public function test_date_comparison_honors_timezone_offsets(): void
+    {
+        $s = $this->subjectWithVault();
+        // 10:00 at -05:00 IS 15:00Z. A ge14:00Z filter must match it even
+        // though the raw strings sort the other way.
+        $this->commit($s, 'Observation', [
+            'status' => 'final', 'code' => ['text' => 'offset'],
+            'effectiveDateTime' => '2025-06-15T10:00:00-05:00',
+        ]);
+
+        $bundle = $this->withToken($s['token'])
+            ->getJson("/api/fhir/{$s['vault_id']}/Observation?date=".urlencode('ge2025-06-15T14:00:00Z'))
+            ->assertOk();
+
+        $this->assertSame(1, $bundle->json('total'));
+    }
+
     public function test_patient_reference_parameter_matches_by_id_or_full_reference(): void
     {
         $s = $this->subjectWithVault();

@@ -53,10 +53,47 @@ final class PatientController
                 ['name' => $data['name'], 'email' => $data['email'] ?? null],
                 $practice->name,
             );
+        } catch (\App\Services\VaultRejected $e) {
+            // A 422 from the vault's registration is a duplicate identity, not
+            // an outage — say so. (A linking flow for an existing vault is E2
+            // work; today the honest answer is a conflict.)
+            if ($e->status === 422 && str_contains($e->path, '/api/users')) {
+                return response()->json([
+                    'error' => 'already_registered',
+                    'message' => 'This person already has an account on the vault server. Linking an existing vault is not yet supported; nothing was saved.',
+                ], 409);
+            }
 
-            // Commit initial demographics through the FHIR door, attributed to
-            // the practice. Runs before local persist: if the vault refuses,
-            // no roster row pretends the patient exists.
+            return response()->json(['error' => 'vault_rejected', 'message' => $e->getMessage()], 502);
+        } catch (VaultUnreachable $e) {
+            return response()->json([
+                'error' => 'vault_unreachable',
+                'message' => 'The vault could not be provisioned; nothing was saved. '.$e->getMessage(),
+            ], 502);
+        }
+
+        // Persist IMMEDIATELY once the grant exists: from here everything is
+        // recoverable (the grant secret is stored). Review finding: committing
+        // demographics before persisting could orphan a live vault whose grant
+        // token existed only in this stack frame.
+        $patient = Patient::query()->create([
+            'practice_id' => $practice->id,
+            'vault_id' => $provisioned['vault_id'],
+            'vault_user_id' => $provisioned['vault_user_id'],
+            'grant_pseudo_id' => $provisioned['grant_pseudo_id'],
+            'grant_otp' => $provisioned['grant_otp'],
+            'grant_token' => $provisioned['grant_token'],
+            'name' => $data['name'],
+            'email' => $data['email'] ?? null,
+            'birth_date' => $data['birth_date'] ?? null,
+            'gender' => $data['gender'] ?? null,
+        ]);
+
+        // Commit initial demographics through the FHIR door. Failure here is
+        // REPORTED, never hidden: the roster row exists and the commit can be
+        // retried, so the honest shape is 201 + demographics_committed=false.
+        $demographicsCommitted = true;
+        try {
             $resource = array_filter([
                 'resourceType' => 'Patient',
                 'name' => [['text' => $data['name']]],
@@ -71,31 +108,26 @@ final class PatientController
                 $resource,
                 $practice->name,
             );
-        } catch (VaultUnreachable $e) {
-            return response()->json([
-                'error' => 'vault_unreachable',
-                'message' => 'The vault could not be provisioned; nothing was saved. '.$e->getMessage(),
-            ], 502);
+        } catch (\App\Services\VaultRejected|VaultUnreachable) {
+            $demographicsCommitted = false;
         }
 
-        $patient = Patient::query()->create([
-            'practice_id' => $practice->id,
-            'vault_id' => $provisioned['vault_id'],
-            'vault_user_id' => $provisioned['vault_user_id'],
-            'grant_pseudo_id' => $provisioned['grant_pseudo_id'],
-            'grant_token' => $provisioned['grant_token'],
-            'name' => $data['name'],
-            'email' => $data['email'] ?? null,
-            'birth_date' => $data['birth_date'] ?? null,
-            'gender' => $data['gender'] ?? null,
-        ]);
-
-        return response()->json(['id' => $patient->id, 'vault_id' => $patient->vault_id], 201);
+        return response()->json([
+            'id' => $patient->id,
+            'vault_id' => $patient->vault_id,
+            'demographics_committed' => $demographicsCommitted,
+        ], 201);
     }
 
     /** GET /api/patients/{id}/chart — the vault's $everything under the grant. */
     public function chart(Request $request, string $id): JsonResponse
     {
+        if (! \Illuminate\Support\Str::isUuid($id)) {
+            // Malformed ids must not become a PostgreSQL cast error (a 500 is a
+            // louder oracle than the 404 this endpoint promises).
+            return response()->json(['error' => 'not_found'], 404);
+        }
+
         /** @var Patient|null $patient */
         $patient = Patient::query()
             ->where('practice_id', $request->user()->practice_id)
@@ -109,6 +141,23 @@ final class PatientController
 
         try {
             return response()->json($this->vault->everything($patient->grant_token, $patient->vault_id));
+        } catch (\App\Services\VaultRejected $e) {
+            // Derived tokens expire ~30 min after redemption. Auth failure means
+            // re-redeem the grant secret for a fresh token and retry ONCE.
+            if (in_array($e->status, [401, 403], true) && $patient->grant_otp !== null) {
+                try {
+                    $fresh = $this->vault->redeemGrant($patient->grant_pseudo_id, $patient->grant_otp);
+                    $patient->update(['grant_token' => $fresh]);
+
+                    return response()->json($this->vault->everything($fresh, $patient->vault_id));
+                } catch (\App\Services\VaultRejected|VaultUnreachable $retry) {
+                    // Grant revoked, expired, or uses exhausted — honest 502
+                    // with the reason; the patient's revocation must stick.
+                    return response()->json(['error' => 'vault_rejected', 'message' => $retry->getMessage()], 502);
+                }
+            }
+
+            return response()->json(['error' => 'vault_rejected', 'message' => $e->getMessage()], 502);
         } catch (VaultUnreachable $e) {
             return response()->json(['error' => 'vault_unreachable', 'message' => $e->getMessage()], 502);
         }

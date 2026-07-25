@@ -47,6 +47,16 @@ foreach (['bundle', 'state', 'source-id', 'types', 'verifier-id', 'verifier-name
 
 $types = array_map('trim', explode(',', $opt['types']));
 
+// Exclusive run lock: two concurrent syncs against one state file silently
+// lose each other's updates (full-file overwrite from a stale snapshot) and
+// re-create already-committed entries as duplicates. Fail loudly instead.
+$lockPath = $opt['state'].'.lock';
+$lockHandle = fopen($lockPath, 'c');
+if ($lockHandle === false || ! flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    fwrite(STDERR, "another sync run holds {$lockPath}; refusing to run concurrently.\n");
+    exit(3);
+}
+
 $source = new SnapshotFileFhirSource($opt['bundle']);
 $state = new JsonFileSyncStateStore($opt['state']);
 $engine = new SyncEngine($source, $state, $opt['source-id']);
@@ -106,31 +116,35 @@ foreach (['base-url', 'vault', 'token'] as $required) {
 }
 
 $client = new VaultClient($opt['base-url'], $opt['token'], $opt['vault']);
-$commit = $client->commit($entries);
 
-echo "Committed {$commit['committed']} entries.\n";
-echo "Vault chain head: {$commit['chain_head_hash']}\n";
+// Commit ONE entry at a time and record its state IMMEDIATELY (review
+// findings): (a) commitOne() returns the REAL per-entry vault id, so future
+// CHANGED classifications supersede the right entry; (b) interleaving commit
+// and record shrinks the crash window to a single entry — a crash between the
+// two can duplicate at most one resource on the next run, not the whole batch.
+$accepted = array_values(array_filter(
+    $candidates,
+    static fn (Candidate $c): bool => in_array($c->disposition, ['accepted', 'edited'], true),
+));
+$committed = 0;
+$chainHead = null;
+foreach ($entries as $i => $entry) {
+    $result = $client->commitOne($entry);
+    $committed++;
+    $chainHead = $result['chain_hash'] ?? $chainHead;
 
-// Record commit outcomes into sync state so the next pull sees these as
-// unchanged, and mark the pull time. Entry order matches $entries order,
-// which matches the accepted/edited candidates order from signOff — but
-// signOff does not expose sourceKey, so we recompute the accepted set here
-// from $candidates directly for the state update (accepted+edited only).
-$committedIndex = 0;
-foreach ($candidates as $candidate) {
-    if (! in_array($candidate->disposition, ['accepted', 'edited'], true)) {
-        continue;
+    $candidate = $accepted[$i] ?? null;
+    $sourceKey = $candidate?->provenance['source_key'] ?? null;
+    $versionId = $candidate?->provenance['source_version_id'] ?? '';
+    $fingerprint = $candidate?->provenance['content_fingerprint'] ?? null;
+    if (is_string($sourceKey) && is_string($fingerprint)) {
+        $engine->recordCommitted($sourceKey, (string) $versionId, $result['id'], $fingerprint);
     }
-    $sourceKey = $candidate->provenance['source_key'] ?? null;
-    $versionId = $candidate->provenance['source_version_id'] ?? '';
-    $fingerprint = $candidate->provenance['content_fingerprint'] ?? null;
-    if (is_string($sourceKey) && is_string($fingerprint) && isset($entries[$committedIndex])) {
-        // The gateway holds only a write grant, so the vault entry id for
-        // THIS commit isn't returned per-entry (only the chain head hash) —
-        // record the head hash as the best available id. Deployments needing
-        // exact per-entry ids should extend VaultClient::commit's response.
-        $engine->recordCommitted($sourceKey, (string) $versionId, (string) ($commit['chain_head_hash'] ?? ''), $fingerprint);
-    }
-    $committedIndex++;
 }
-$engine->markPulled(gmdate('c'));
+
+echo "Committed {$committed} entries.\n";
+echo "Vault chain head: {$chainHead}\n";
+
+// Checkpoint = the captured PULL-START time (never post-commit "now" — a
+// resource updated mid-run would otherwise be silently unfetchable forever).
+$engine->markPulled();

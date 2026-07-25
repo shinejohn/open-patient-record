@@ -22,16 +22,17 @@ final class Patient extends Model
 
     protected $fillable = [
         'practice_id', 'vault_id', 'vault_user_id', 'grant_pseudo_id',
-        'grant_token', 'name', 'email', 'birth_date', 'gender',
+        'grant_token', 'grant_otp', 'name', 'email', 'birth_date', 'gender',
     ];
 
-    protected $hidden = ['grant_token'];
+    protected $hidden = ['grant_token', 'grant_otp'];
 
     /** @return array<string, string> */
     protected function casts(): array
     {
         return [
             'grant_token' => 'encrypted',
+            'grant_otp' => 'encrypted',
             'name' => 'encrypted',
             'email' => 'encrypted',
             'birth_date' => 'encrypted',

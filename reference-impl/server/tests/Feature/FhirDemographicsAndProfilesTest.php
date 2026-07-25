@@ -96,6 +96,72 @@ final class FhirDemographicsAndProfilesTest extends TestCase
         $this->assertSame('Rivera-Gomez', $bundle->json('entry.0.resource.name.0.family'));
     }
 
+    public function test_anchor_carries_no_demographics_when_the_grant_scope_excludes_patient(): void
+    {
+        $s = $this->subjectWithVault();
+
+        // Real demographics exist in the vault…
+        $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/Patient", [
+                'resourceType' => 'Patient',
+                'name' => [['family' => 'Rivera', 'given' => ['Ana']]],
+                'birthDate' => '1987-03-14',
+            ])
+            ->assertCreated();
+        $this->commitEntry($s['token'], $s['vault_id'])->assertCreated(); // a Condition
+
+        // …but this grant covers Condition ONLY.
+        $mint = $this->mintGrant($s['token'], $s['vault_id'], [
+            'scope' => ['Condition'],
+            'permissions' => ['read'],
+        ])->assertCreated();
+        $redeem = $this->postJson('/api/grants/redeem', [
+            'pseudo_id' => $mint->json('pseudo_id'),
+            'otp' => $mint->json('otp'),
+        ])->assertOk();
+
+        $bundle = $this->withToken($redeem->json('token'))
+            ->getJson("/api/fhir/{$s['vault_id']}/Patient/\$everything")
+            ->assertOk();
+
+        $anchor = $bundle->json('entry.0.resource');
+        $this->assertSame('Patient', $anchor['resourceType']);
+        $this->assertSame($s['vault_id'], $anchor['id']); // join point only — already in the URL
+
+        // The scope excluded Patient: no name, no birthDate, no account identity.
+        $this->assertArrayNotHasKey('name', $anchor);
+        $this->assertArrayNotHasKey('birthDate', $anchor);
+        $this->assertStringNotContainsString('Rivera', $bundle->content());
+        $this->assertStringNotContainsString($s['vault_id'] === '' ? '@' : 'Test subject@', $bundle->content());
+    }
+
+    public function test_anchor_keeps_demographics_for_grants_that_cover_patient(): void
+    {
+        $s = $this->subjectWithVault();
+        $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/Patient", [
+                'resourceType' => 'Patient',
+                'name' => [['family' => 'Rivera']],
+                'birthDate' => '1987-03-14',
+            ])
+            ->assertCreated();
+
+        $mint = $this->mintGrant($s['token'], $s['vault_id'], [
+            'scope' => ['*'],
+            'permissions' => ['read'],
+        ])->assertCreated();
+        $redeem = $this->postJson('/api/grants/redeem', [
+            'pseudo_id' => $mint->json('pseudo_id'),
+            'otp' => $mint->json('otp'),
+        ])->assertOk();
+
+        $bundle = $this->withToken($redeem->json('token'))
+            ->getJson("/api/fhir/{$s['vault_id']}/Patient/\$everything")
+            ->assertOk();
+
+        $this->assertSame('1987-03-14', $bundle->json('entry.0.resource.birthDate'));
+    }
+
     public function test_condition_with_category_and_code_is_stamped_us_core(): void
     {
         $s = $this->subjectWithVault();

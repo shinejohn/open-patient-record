@@ -167,9 +167,12 @@ final class FhirSearchEngine
     }
 
     /**
-     * ISO-string comparison: FHIR instants sort lexicographically, so prefix
-     * comparison is exact without timezone arithmetic. A date-only search value
-     * compares against the element's date part.
+     * Date comparison. Date-only search values compare against the element's
+     * date part as strings (ISO dates sort lexicographically). Datetime values
+     * are compared as EPOCH SECONDS, because FHIR instants may legitimately
+     * differ in timezone offset — 10:00-05:00 IS 15:00Z, and a raw string
+     * comparison silently gets that wrong in clinically meaningful ways
+     * (found by adversarial review).
      */
     private function dateMatches(string $element, string $value): bool
     {
@@ -179,15 +182,31 @@ final class FhirSearchEngine
             $value = $m[2];
         }
 
-        $subject = strlen($value) === 10 ? substr($element, 0, 10) : $element;
+        if (strlen($value) === 10) {
+            // Date-only: compare against the element's date part.
+            $subject = substr($element, 0, 10);
 
+            return $this->compare($prefix, strcmp($subject, $value));
+        }
+
+        $elementTs = strtotime($element);
+        $valueTs = strtotime($value);
+        if ($elementTs === false || $valueTs === false) {
+            return false; // unparseable never matches — fail closed
+        }
+
+        return $this->compare($prefix, $elementTs <=> $valueTs);
+    }
+
+    private function compare(string $prefix, int $cmp): bool
+    {
         return match ($prefix) {
-            'eq' => $subject === $value,
-            'ne' => $subject !== $value,
-            'gt' => $subject > $value,
-            'lt' => $subject < $value,
-            'ge' => $subject >= $value,
-            'le' => $subject <= $value,
+            'eq' => $cmp === 0,
+            'ne' => $cmp !== 0,
+            'gt' => $cmp > 0,
+            'lt' => $cmp < 0,
+            'ge' => $cmp >= 0,
+            'le' => $cmp <= 0,
             default => false,
         };
     }

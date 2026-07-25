@@ -33,16 +33,28 @@ final class SyncEngine
         'DiagnosticReport' => Candidate::DOMAIN_RESULT,
     ];
 
+    /** ISO8601 time the current pull STARTED — the only safe checkpoint. */
+    private ?string $pullStartedAt = null;
+
     public function __construct(
         private readonly FhirSource $source,
         private readonly SyncStateStore $state,
         private readonly string $sourceId,
+        private ?\Closure $clock = null,
     ) {
+        $this->clock ??= static fn (): string => gmdate('c');
     }
 
     /** @param list<string> $types */
     public function pull(array $types): SyncPlan
     {
+        // Capture the checkpoint BEFORE fetching. Review-confirmed critical:
+        // checkpointing at completion time permanently loses any resource the
+        // incumbent updates between fetch and completion when the source
+        // honors $since — a silent drop the completeness counts never see,
+        // because the resource is filtered out before the plan exists.
+        $this->pullStartedAt = ($this->clock)();
+
         $plan = new SyncPlan();
         $since = $this->state->lastPulledAt($this->sourceId);
 
@@ -121,9 +133,17 @@ final class SyncEngine
         $this->state->put($this->sourceId, $sourceKey, $versionId, $vaultEntryId, $fingerprint);
     }
 
-    public function markPulled(string $pulledAt): void
+    /**
+     * Record the checkpoint. Defaults to the captured PULL-START time — pass an
+     * explicit value only if you know a safer one (never "now" after commits).
+     */
+    public function markPulled(?string $pulledAt = null): void
     {
-        $this->state->markPulled($this->sourceId, $pulledAt);
+        $at = $pulledAt ?? $this->pullStartedAt;
+        if ($at === null) {
+            throw new \LogicException('markPulled() before any pull(): no checkpoint to record.');
+        }
+        $this->state->markPulled($this->sourceId, $at);
     }
 
     /**

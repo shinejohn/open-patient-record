@@ -42,26 +42,41 @@ final class VaultBridge
         // 2. Create the vault as the subject.
         $vaultId = (string) $this->post('/api/vaults', [], $subjectToken)->json('id');
 
-        // 3. Mint a treatment grant (subject-only operation), then redeem it.
+        // 3. Mint a LONG-LIVED treatment grant (subject-only operation), then
+        // redeem it. Derived tokens expire in ~30 minutes on the vault, so the
+        // grant itself must outlive them by a clinical margin — one year — and
+        // the redemption secret is returned to the caller so expiry means
+        // re-redemption, not a bricked chart. The patient can revoke the grant
+        // at any time; that is the kill switch, not token death.
         $mint = $this->post("/api/vaults/{$vaultId}/grants", [
             'purpose' => 'treatment',
             'scope' => ['*'],
             'permissions' => ['read', 'write'],
             'max_uses' => 100000,
+            'expires_in_minutes' => 525600,
         ], $subjectToken);
 
-        $grantToken = (string) $this->post('/api/grants/redeem', [
-            'pseudo_id' => $mint->json('pseudo_id'),
-            'otp' => $mint->json('otp'),
-        ])->json('token');
+        $pseudoId = (string) $mint->json('pseudo_id');
+        $otp = (string) $mint->json('otp');
+        $grantToken = $this->redeemGrant($pseudoId, $otp);
 
         // The subject token and password go out of scope here — deliberately.
         return [
             'vault_user_id' => $vaultUserId,
             'vault_id' => $vaultId,
-            'grant_pseudo_id' => (string) $mint->json('pseudo_id'),
+            'grant_pseudo_id' => $pseudoId,
+            'grant_otp' => $otp,
             'grant_token' => $grantToken,
         ];
+    }
+
+    /** Redeem (or re-redeem) a grant's secret for a fresh derived token. */
+    public function redeemGrant(string $pseudoId, string $otp): string
+    {
+        return (string) $this->post('/api/grants/redeem', [
+            'pseudo_id' => $pseudoId,
+            'otp' => $otp,
+        ])->json('token');
     }
 
     /** @param array<string, mixed> $resource */
@@ -103,8 +118,17 @@ final class VaultBridge
 
         try {
             $response = $method === 'get' ? $request->get($path, $body) : $request->post($path, $body);
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+        } catch (\Illuminate\Http\Client\HttpClientException $e) {
+            // Covers connection failures AND read timeouts across client versions.
             throw new VaultUnreachable("Vault connection failed: {$e->getMessage()}", previous: $e);
+        }
+
+        if ($response->clientError()) {
+            throw new VaultRejected(
+                $response->status(),
+                $path,
+                "Vault refused {$method} {$path} with HTTP {$response->status()}.",
+            );
         }
 
         if ($response->failed()) {

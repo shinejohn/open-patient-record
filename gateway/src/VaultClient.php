@@ -26,28 +26,46 @@ final class VaultClient
 
     /**
      * @param list<array<string, mixed>> $entries commit-ready entries from Verification::signOff
-     * @return array{committed: int, chain_head_hash: ?string}
+     * @return array{committed: int, chain_head_hash: ?string, entry_ids: list<string>}
      */
     public function commit(array $entries): array
     {
         $committed = 0;
         $chainHead = null;
+        $entryIds = [];
 
         foreach ($entries as $entry) {
-            $response = $this->post("/api/vaults/{$this->vaultId}/entries", $entry);
-            if (($response['status'] ?? 0) !== 201) {
-                throw new RuntimeException(
-                    "vault rejected entry ({$response['status']}): ".json_encode($response['body']),
-                );
-            }
+            $result = $this->commitOne($entry);
             $committed++;
-            // Each commit response carries the new chain hash — the last one is the
-            // head. (Reading the vault resource needs a subject token; the Gateway
-            // holds only a write grant, so we track the head from commit responses.)
-            $chainHead = $response['body']['chain_hash'] ?? $chainHead;
+            $chainHead = $result['chain_hash'] ?? $chainHead;
+            $entryIds[] = $result['id'];
         }
 
-        return ['committed' => $committed, 'chain_head_hash' => $chainHead];
+        return ['committed' => $committed, 'chain_head_hash' => $chainHead, 'entry_ids' => $entryIds];
+    }
+
+    /**
+     * Commit a single entry and return ITS vault entry id + chain hash. The
+     * per-entry id is what supersession tracking needs (review-confirmed: a
+     * batch that records only the final chain head gives every entry the same
+     * wrong id, corrupting future replaces_entry_id references).
+     *
+     * @param array<string, mixed> $entry
+     * @return array{id: string, chain_hash: ?string}
+     */
+    public function commitOne(array $entry): array
+    {
+        $response = $this->post("/api/vaults/{$this->vaultId}/entries", $entry);
+        if (($response['status'] ?? 0) !== 201) {
+            throw new RuntimeException(
+                "vault rejected entry ({$response['status']}): ".json_encode($response['body']),
+            );
+        }
+
+        return [
+            'id' => (string) ($response['body']['id'] ?? ''),
+            'chain_hash' => $response['body']['chain_hash'] ?? null,
+        ];
     }
 
     /** @param array<string, mixed> $body @return array{status: int, body: mixed} */

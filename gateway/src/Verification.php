@@ -99,6 +99,14 @@ final class Verification
                     'disposition' => $c->disposition,
                 ],
             ];
+
+            // A CHANGED sync resource supersedes its prior vault entry — the
+            // whole point of continuous sync. Review-confirmed gap: this field
+            // was set on candidates and then dropped here, so supersession
+            // never reached the vault and every change became a duplicate.
+            if ($c->replacesVaultEntryId !== null) {
+                $entries[array_key_last($entries)]['replaces_entry_id'] = $c->replacesVaultEntryId;
+            }
         }
 
         return $entries;

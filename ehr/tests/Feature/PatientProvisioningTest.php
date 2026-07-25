@@ -174,6 +174,95 @@ final class PatientProvisioningTest extends TestCase
             ->assertJsonCount(0, 'patients');
     }
 
+    public function test_treatment_grant_is_minted_long_lived(): void
+    {
+        $this->fakeVaultProvisioning();
+        $p = $this->practice();
+
+        $this->withToken($p['token'])->postJson('/api/patients', ['name' => 'Ana Rivera'])->assertCreated();
+
+        // Derived tokens expire in ~30 min on the vault; the GRANT must outlive
+        // them by a clinical margin so re-redemption keeps working.
+        Http::assertSent(fn ($req) => str_contains($req->url(), '/grants')
+            && ! str_contains($req->url(), 'redeem')
+            && ($req['expires_in_minutes'] ?? 0) >= 525600);
+    }
+
+    public function test_expired_derived_token_is_re_redeemed_and_the_call_retried(): void
+    {
+        Http::fake([
+            self::VAULT.'/api/users' => Http::response(['token' => 'subject-token-1', 'user' => ['id' => 'user-uuid-1']], 201),
+            self::VAULT.'/api/vaults' => Http::response(['id' => 'vault-uuid-1'], 201),
+            self::VAULT.'/api/vaults/vault-uuid-1/grants' => Http::response(['pseudo_id' => 'pseudo-1', 'otp' => '12345678'], 201),
+            self::VAULT.'/api/grants/redeem' => Http::sequence()
+                ->push(['token' => 'grant-token-1'], 200)
+                ->push(['token' => 'grant-token-2'], 200),
+            self::VAULT.'/api/fhir/vault-uuid-1/Patient' => Http::response(['resourceType' => 'Patient'], 201),
+            self::VAULT.'/api/fhir/vault-uuid-1/Patient/$everything' => Http::sequence()
+                ->push(['error' => 'unauthenticated'], 401) // derived token expired
+                ->push(['resourceType' => 'Bundle', 'type' => 'searchset'], 200),
+        ]);
+
+        $p = $this->practice();
+        $id = $this->withToken($p['token'])->postJson('/api/patients', ['name' => 'Ana Rivera'])
+            ->assertCreated()->json('id');
+
+        // 30+ minutes later, the stored token is dead; the chart must still work.
+        $this->withToken($p['token'])
+            ->getJson("/api/patients/{$id}/chart")
+            ->assertOk()
+            ->assertJsonPath('resourceType', 'Bundle');
+
+        // The retry used the freshly redeemed token.
+        Http::assertSent(fn ($req) => str_contains($req->url(), '$everything')
+            && $req->header('Authorization')[0] === 'Bearer grant-token-2');
+    }
+
+    public function test_duplicate_vault_email_maps_to_conflict_not_outage(): void
+    {
+        Http::fake([
+            self::VAULT.'/api/users' => Http::response(['message' => 'The email has already been taken.'], 422),
+        ]);
+        $p = $this->practice();
+
+        $this->withToken($p['token'])
+            ->postJson('/api/patients', ['name' => 'Ana Rivera', 'email' => 'ana@example.test'])
+            ->assertStatus(409)
+            ->assertJsonPath('error', 'already_registered');
+
+        $this->assertSame(0, DB::table('patients')->count());
+    }
+
+    public function test_demographics_commit_failure_is_reported_not_hidden(): void
+    {
+        Http::fake([
+            self::VAULT.'/api/users' => Http::response(['token' => 'subject-token-1', 'user' => ['id' => 'user-uuid-1']], 201),
+            self::VAULT.'/api/vaults' => Http::response(['id' => 'vault-uuid-1'], 201),
+            self::VAULT.'/api/vaults/vault-uuid-1/grants' => Http::response(['pseudo_id' => 'pseudo-1', 'otp' => '12345678'], 201),
+            self::VAULT.'/api/grants/redeem' => Http::response(['token' => 'grant-token-1'], 200),
+            self::VAULT.'/api/fhir/vault-uuid-1/Patient' => Http::response(['error' => 'boom'], 500),
+        ]);
+        $p = $this->practice();
+
+        // The vault + grant exist and are SAVED (recoverable), so this is a 201
+        // — but the response says plainly that demographics did not commit.
+        $created = $this->withToken($p['token'])
+            ->postJson('/api/patients', ['name' => 'Ana Rivera'])
+            ->assertCreated();
+
+        $this->assertFalse($created->json('demographics_committed'));
+        $this->assertSame(1, DB::table('patients')->count());
+    }
+
+    public function test_malformed_patient_id_is_a_clean_404(): void
+    {
+        $p = $this->practice();
+
+        $this->withToken($p['token'])
+            ->getJson('/api/patients/not-a-uuid/chart')
+            ->assertStatus(404);
+    }
+
     public function test_unauthenticated_requests_are_rejected(): void
     {
         $this->postJson('/api/patients', ['name' => 'X'])->assertStatus(401);
