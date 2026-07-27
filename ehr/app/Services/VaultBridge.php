@@ -93,6 +93,30 @@ final class VaultBridge
         return (array) $this->send('get', "/api/fhir/{$vaultId}/Patient/\$everything", [], $grantToken)->json();
     }
 
+    /**
+     * Commit several resources as ONE transaction Bundle — all-or-nothing on
+     * the vault chain. Used by encounter signing (Encounter + note) so a
+     * half-signed visit cannot exist.
+     *
+     * @param list<array<string, mixed>> $resources
+     * @return array<string, mixed> the transaction-response Bundle
+     */
+    public function commitBundle(string $grantToken, string $vaultId, array $resources, string $organization): array
+    {
+        $bundle = [
+            'resourceType' => 'Bundle',
+            'type' => 'transaction',
+            'entry' => array_map(static fn (array $r): array => [
+                'resource' => $r,
+                'request' => ['method' => 'POST', 'url' => $r['resourceType']],
+            ], $resources),
+        ];
+
+        return (array) $this->send('post', "/api/fhir/{$vaultId}", $bundle, $grantToken, [
+            'X-OPR-Organization' => $organization,
+        ])->json();
+    }
+
     // ---------------------------------------------------------------
 
     /** @param array<string, mixed> $body */

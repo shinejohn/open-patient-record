@@ -9,14 +9,20 @@ declare(strict_types=1);
  * applicable) into an OPR vault via the public API.
  *
  * The gateway library is dependency-free and ships no HTTP client, so this CLI
- * reads the "source" as a FHIR Bundle JSON file (SnapshotFileFhirSource) —
- * e.g. a scheduled export from the incumbent EHR. That file IS the FhirSource
- * boundary: at deployment time, swap in a live HTTP FhirSource (polling the
- * incumbent's FHIR API) implementing the exact same interface; nothing else
- * in SyncEngine changes.
+ * can read the "source" either as a FHIR Bundle JSON file (SnapshotFileFhirSource)
+ * — e.g. a scheduled export from the incumbent EHR — or, at deployment time,
+ * poll the incumbent's live FHIR API directly (HttpFhirSource). Exactly one of
+ * --bundle / --fhir-base is required; both implement the same FhirSource
+ * interface, so nothing else in SyncEngine changes.
  *
  *   php bin/sync.php --bundle=snapshot.json --state=sync-state.json \
  *                     --source-id=incumbent-ehr --types=MedicationStatement,AllergyIntolerance \
+ *                     --base-url=http://localhost:8000 --vault=<uuid> --token=<write-grant-token> \
+ *                     --verifier-id=u1 --verifier-name="Dr. Okafor" [--acknowledge-unresolved] [--dry-run]
+ *
+ *   php bin/sync.php --fhir-base=https://ehr.example/fhir --fhir-token=<incumbent-bearer-token> \
+ *                     --state=sync-state.json --source-id=incumbent-ehr \
+ *                     --types=MedicationStatement,AllergyIntolerance \
  *                     --base-url=http://localhost:8000 --vault=<uuid> --token=<write-grant-token> \
  *                     --verifier-id=u1 --verifier-name="Dr. Okafor" [--acknowledge-unresolved] [--dry-run]
  */
@@ -25,6 +31,8 @@ require __DIR__.'/../vendor/autoload.php';
 
 use Opr\Gateway\Candidate;
 use Opr\Gateway\IngestionResult;
+use Opr\Gateway\Sync\FhirSource;
+use Opr\Gateway\Sync\HttpFhirSource;
 use Opr\Gateway\Sync\SnapshotFileFhirSource;
 use Opr\Gateway\Sync\SyncEngine;
 use Opr\Gateway\Sync\SyncItem;
@@ -33,16 +41,27 @@ use Opr\Gateway\VaultClient;
 use Opr\Gateway\Verification;
 
 $opt = getopt('', [
-    'bundle:', 'state:', 'source-id:', 'types:',
+    'bundle:', 'fhir-base:', 'fhir-token:', 'state:', 'source-id:', 'types:',
     'base-url:', 'vault:', 'token:', 'verifier-id:', 'verifier-name:',
     'acknowledge-unresolved', 'dry-run',
 ]);
 
-foreach (['bundle', 'state', 'source-id', 'types', 'verifier-id', 'verifier-name'] as $required) {
+foreach (['state', 'source-id', 'types', 'verifier-id', 'verifier-name'] as $required) {
     if (empty($opt[$required])) {
         fwrite(STDERR, "missing --{$required}\n");
         exit(2);
     }
+}
+
+$hasBundle = ! empty($opt['bundle']);
+$hasFhirBase = ! empty($opt['fhir-base']);
+if ($hasBundle === $hasFhirBase) {
+    fwrite(STDERR, "exactly one of --bundle or --fhir-base is required\n");
+    exit(2);
+}
+if ($hasFhirBase && empty($opt['fhir-token'])) {
+    fwrite(STDERR, "missing --fhir-token (required with --fhir-base)\n");
+    exit(2);
 }
 
 $types = array_map('trim', explode(',', $opt['types']));
@@ -57,7 +76,10 @@ if ($lockHandle === false || ! flock($lockHandle, LOCK_EX | LOCK_NB)) {
     exit(3);
 }
 
-$source = new SnapshotFileFhirSource($opt['bundle']);
+/** @var FhirSource $source */
+$source = $hasFhirBase
+    ? new HttpFhirSource($opt['fhir-base'], $opt['fhir-token'])
+    : new SnapshotFileFhirSource($opt['bundle']);
 $state = new JsonFileSyncStateStore($opt['state']);
 $engine = new SyncEngine($source, $state, $opt['source-id']);
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Http\Controllers\Concerns\CallsVaultUnderGrant;
 use App\Models\Patient;
 use App\Services\VaultBridge;
 use App\Services\VaultUnreachable;
@@ -17,6 +18,8 @@ use Illuminate\Http\Request;
  */
 final class PatientController
 {
+    use CallsVaultUnderGrant;
+
     public function __construct(private readonly VaultBridge $vault)
     {
     }
@@ -140,26 +143,61 @@ final class PatientController
         }
 
         try {
-            return response()->json($this->vault->everything($patient->grant_token, $patient->vault_id));
+            return response()->json($this->underGrant(
+                $this->vault,
+                $patient,
+                fn (string $token): array => $this->vault->everything($token, $patient->vault_id),
+            ));
         } catch (\App\Services\VaultRejected $e) {
-            // Derived tokens expire ~30 min after redemption. Auth failure means
-            // re-redeem the grant secret for a fresh token and retry ONCE.
-            if (in_array($e->status, [401, 403], true) && $patient->grant_otp !== null) {
-                try {
-                    $fresh = $this->vault->redeemGrant($patient->grant_pseudo_id, $patient->grant_otp);
-                    $patient->update(['grant_token' => $fresh]);
-
-                    return response()->json($this->vault->everything($fresh, $patient->vault_id));
-                } catch (\App\Services\VaultRejected|VaultUnreachable $retry) {
-                    // Grant revoked, expired, or uses exhausted — honest 502
-                    // with the reason; the patient's revocation must stick.
-                    return response()->json(['error' => 'vault_rejected', 'message' => $retry->getMessage()], 502);
-                }
-            }
-
+            // Grant revoked, expired, or uses exhausted — honest 502 with the
+            // reason; the patient's revocation must stick.
             return response()->json(['error' => 'vault_rejected', 'message' => $e->getMessage()], 502);
         } catch (VaultUnreachable $e) {
             return response()->json(['error' => 'vault_unreachable', 'message' => $e->getMessage()], 502);
         }
+    }
+
+    /**
+     * POST /api/patients/link — attach a patient who ALREADY has a vault.
+     *
+     * This is the custody-correct answer to 409 already_registered: the
+     * PATIENT mints a grant on their own vault (portal/QR) and hands the
+     * practice the redemption secret. The practice proves the grant works by
+     * reading $everything, then stores the secret + token. It never owns the
+     * vault — same guest posture as a provisioned patient.
+     */
+    public function link(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'vault_id' => ['required', 'string', 'max:64'],
+            'pseudo_id' => ['required', 'string', 'max:64'],
+            'otp' => ['required', 'string', 'max:64'],
+        ]);
+
+        try {
+            $token = $this->vault->redeemGrant($data['pseudo_id'], $data['otp']);
+            // Prove the grant actually opens THIS vault before storing anything.
+            $this->vault->everything($token, $data['vault_id']);
+        } catch (\App\Services\VaultRejected $e) {
+            return response()->json([
+                'error' => 'grant_redemption_failed',
+                'message' => 'The grant could not be redeemed or does not open that vault; nothing was saved.',
+            ], 422);
+        } catch (VaultUnreachable $e) {
+            return response()->json(['error' => 'vault_unreachable', 'message' => $e->getMessage()], 502);
+        }
+
+        $patient = Patient::query()->create([
+            'practice_id' => $request->user()->practice_id,
+            'vault_id' => $data['vault_id'],
+            'vault_user_id' => 'linked',
+            'grant_pseudo_id' => $data['pseudo_id'],
+            'grant_otp' => $data['otp'],
+            'grant_token' => $token,
+            'name' => $data['name'],
+        ]);
+
+        return response()->json(['id' => $patient->id, 'vault_id' => $patient->vault_id], 201);
     }
 }

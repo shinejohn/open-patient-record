@@ -259,4 +259,33 @@ final class SyncEngineTest extends TestCase
             'a CHANGED resource must supersede its prior vault entry at sign-off',
         );
     }
+
+    public function test_duplicate_source_id_in_one_pull_is_unresolved_never_dropped(): void
+    {
+        // MEDIUM finding: a source that yields the same {type}/{id} twice in one
+        // pull must not silently produce two competing candidates. The first
+        // occurrence classifies normally; every subsequent duplicate becomes an
+        // UNRESOLVED item — counted, never dropped.
+        $resource = [
+            'resourceType' => 'Condition',
+            'id' => 'dup-1',
+            'meta' => ['versionId' => '1', 'lastUpdated' => '2026-01-01T00:00:00Z'],
+            'code' => ['text' => 'Hypertension'],
+        ];
+        $source = new ArrayFhirSource([$resource, $resource]);
+        $state = new JsonFileSyncStateStore($this->stateFile);
+        $engine = new SyncEngine($source, $state, 'incumbent-ehr');
+
+        $plan = $engine->pull(['Condition']);
+
+        $this->assertSame(2, $plan->counts['Condition']['fetched']);
+        $this->assertSame(1, $plan->counts['Condition']['new']);
+        $this->assertSame(1, $plan->counts['Condition']['unresolved']);
+        $unresolved = $plan->itemsOf(SyncItem::UNRESOLVED);
+        $this->assertCount(1, $unresolved);
+        $this->assertSame('duplicate source id in pull', $unresolved[0]->unresolvedReason);
+
+        $candidates = $engine->toCandidates($plan);
+        $this->assertCount(1, $candidates);
+    }
 }

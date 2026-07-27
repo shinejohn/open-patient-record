@@ -57,18 +57,23 @@ final class SyncEngine
 
         $plan = new SyncPlan();
         $since = $this->state->lastPulledAt($this->sourceId);
+        $seenSourceKeys = [];
 
         foreach ($types as $type) {
             foreach ($this->source->fetch($type, $since) as $resource) {
-                $plan->add($this->classify($type, $resource));
+                $plan->add($this->classify($type, $resource, $seenSourceKeys));
             }
         }
 
         return $plan;
     }
 
-    /** @param array<string, mixed> $resource */
-    private function classify(string $type, array $resource): SyncItem
+    /**
+     * @param  array<string, mixed>  $resource
+     * @param  array<string, true>  $seenSourceKeys  keys seen so far in THIS pull()
+     *                                                call; mutated in place to track duplicates.
+     */
+    private function classify(string $type, array $resource, array &$seenSourceKeys): SyncItem
     {
         $id = $resource['id'] ?? null;
         if (! is_string($id) || $id === '') {
@@ -76,6 +81,16 @@ final class SyncEngine
         }
 
         $sourceKey = "{$type}/{$id}";
+
+        // MEDIUM finding: a source that yields the same {type}/{id} twice in one
+        // pull must never produce two competing candidates. The first occurrence
+        // classifies normally; every later duplicate is UNRESOLVED — counted,
+        // never dropped, never a second candidate.
+        if (isset($seenSourceKeys[$sourceKey])) {
+            return new SyncItem($type, $sourceKey, SyncItem::UNRESOLVED, $resource, unresolvedReason: 'duplicate source id in pull');
+        }
+        $seenSourceKeys[$sourceKey] = true;
+
         $fingerprint = self::fingerprint($resource);
         $prior = $this->state->get($this->sourceId, $sourceKey);
 
