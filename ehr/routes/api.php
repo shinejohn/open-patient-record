@@ -29,6 +29,15 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/encounters/{id}/sign', [EncounterController::class, 'sign']);
     });
 
+    // Billing + the honest transmission ledger (clinical roles).
+    Route::middleware('role:owner,clinician')->group(function (): void {
+        Route::post('/fee-schedule', [\App\Http\Controllers\BillingController::class, 'storeFeeItem']);
+        Route::post('/invoices', [\App\Http\Controllers\BillingController::class, 'storeInvoice']);
+        Route::post('/invoices/{id}/payments', [\App\Http\Controllers\BillingController::class, 'storePayment']);
+        Route::post('/transmissions', [\App\Http\Controllers\TransmissionController::class, 'store']);
+        Route::post('/transmissions/{id}/complete', [\App\Http\Controllers\TransmissionController::class, 'complete']);
+    });
+
     // Staff management: owner only — authority over roles never delegates.
     Route::post('/staff', [StaffController::class, 'store'])->middleware('role:owner');
 });
