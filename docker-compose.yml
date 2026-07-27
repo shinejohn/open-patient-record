@@ -1,0 +1,71 @@
+# OPR quickstart: vault server + EHR practice-ops backend + PostgreSQL.
+#
+# HONESTY NOTE: this compose file is written to match the verified local-dev
+# topology (see ./e2e-ehr.sh, which boots the same two apps without docker and
+# passes 17/17 live checks), but it has NOT itself been CI-verified — the
+# authoring machine has no docker. If it misbehaves for you, e2e-ehr.sh is the
+# known-good reference; issues welcome.
+#
+#   docker compose up --build
+#   vault:  http://localhost:8801   (FHIR base: /api/fhir/{vault})
+#   ehr:    http://localhost:8802   (start at POST /api/register-practice)
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: opr
+      POSTGRES_PASSWORD: opr
+      POSTGRES_DB: opr_vault
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opr"]
+      interval: 3s
+      retries: 20
+
+  vault:
+    build:
+      context: ./reference-impl/server
+      dockerfile_inline: |
+        FROM php:8.4-cli
+        RUN apt-get update && apt-get install -y libpq-dev git unzip && docker-php-ext-install pdo_pgsql
+        COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+        WORKDIR /app
+        COPY . .
+        RUN composer install --no-interaction --no-scripts
+        CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8801
+    environment:
+      APP_ENV: local
+      APP_KEY: ${VAULT_APP_KEY:?run: export VAULT_APP_KEY=base64:$(php -r "echo base64_encode(random_bytes(32));")}
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: opr_vault
+      DB_USERNAME: opr
+      DB_PASSWORD: opr
+      LOG_CHANNEL: stderr
+    ports: ["8801:8801"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ehr:
+    build:
+      context: ./ehr
+      dockerfile_inline: |
+        FROM php:8.4-cli
+        RUN apt-get update && apt-get install -y git unzip
+        COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+        WORKDIR /app
+        COPY . .
+        RUN composer install --no-interaction --no-scripts && touch /tmp/ehr.sqlite
+        CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8802
+    environment:
+      APP_ENV: local
+      APP_KEY: ${EHR_APP_KEY:?run: export EHR_APP_KEY=base64:$(php -r "echo base64_encode(random_bytes(32));")}
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /tmp/ehr.sqlite
+      OPR_VAULT_BASE_URL: http://vault:8801
+      LOG_CHANNEL: stderr
+    ports: ["8802:8802"]
+    depends_on:
+      - vault
