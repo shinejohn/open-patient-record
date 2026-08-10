@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AppointmentController;
+use App\Http\Controllers\BillingController;
+use App\Http\Controllers\ClinicalDataController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EncounterController;
 use App\Http\Controllers\FormTemplateController;
@@ -12,6 +14,7 @@ use App\Http\Controllers\PracticeController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\StatementController;
 use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\TransmissionController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/register-practice', [PracticeController::class, 'register'])
@@ -32,15 +35,25 @@ Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/patients/{id}/encounters', [EncounterController::class, 'store']);
         Route::patch('/encounters/{id}', [EncounterController::class, 'update']);
         Route::post('/encounters/{id}/sign', [EncounterController::class, 'sign']);
+
+        // Structured clinical capture: vitals, problems, medications,
+        // allergies, immunizations — each commits directly to the vault
+        // (FHIR door), never a local copy. Same clinical role gate as
+        // encounters.
+        Route::post('/patients/{id}/vitals', [ClinicalDataController::class, 'storeVitals']);
+        Route::post('/patients/{id}/problems', [ClinicalDataController::class, 'storeProblem']);
+        Route::post('/patients/{id}/medications', [ClinicalDataController::class, 'storeMedication']);
+        Route::post('/patients/{id}/allergies', [ClinicalDataController::class, 'storeAllergy']);
+        Route::post('/patients/{id}/immunizations', [ClinicalDataController::class, 'storeImmunization']);
     });
 
     // Billing + the honest transmission ledger (clinical roles).
     Route::middleware('role:owner,clinician')->group(function (): void {
-        Route::post('/fee-schedule', [\App\Http\Controllers\BillingController::class, 'storeFeeItem']);
-        Route::post('/invoices', [\App\Http\Controllers\BillingController::class, 'storeInvoice']);
-        Route::post('/invoices/{id}/payments', [\App\Http\Controllers\BillingController::class, 'storePayment']);
-        Route::post('/transmissions', [\App\Http\Controllers\TransmissionController::class, 'store']);
-        Route::post('/transmissions/{id}/complete', [\App\Http\Controllers\TransmissionController::class, 'complete']);
+        Route::post('/fee-schedule', [BillingController::class, 'storeFeeItem']);
+        Route::post('/invoices', [BillingController::class, 'storeInvoice']);
+        Route::post('/invoices/{id}/payments', [BillingController::class, 'storePayment']);
+        Route::post('/transmissions', [TransmissionController::class, 'store']);
+        Route::post('/transmissions/{id}/complete', [TransmissionController::class, 'complete']);
     });
 
     // Staff management: owner only — authority over roles never delegates.
