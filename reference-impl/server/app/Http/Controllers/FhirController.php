@@ -331,6 +331,22 @@ final class FhirController
             ], 422);
         }
 
+        // US Core conformance: only enforced when the client itself asserts a
+        // US Core profile via meta.profile (see FhirResourceRegistry doc — an
+        // unasserted resource keeps the existing presence-level badge-only
+        // behavior and is never rejected for lacking a profile it never claimed).
+        $violations = \App\Services\FhirResourceRegistry::usCoreConformanceViolations($type, $payload);
+        if ($violations !== []) {
+            return response()->json([
+                'resourceType' => 'OperationOutcome',
+                'issue' => array_map(static fn (string $v): array => [
+                    'severity' => 'error',
+                    'code' => 'invalid',
+                    'diagnostics' => "US Core conformance violation: {$v}",
+                ], $violations),
+            ], 422);
+        }
+
         return null;
     }
 

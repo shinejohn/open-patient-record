@@ -37,6 +37,17 @@ final class Vault extends Model
         return self::dekFor($this->id);
     }
 
+    /**
+     * Evict a vault's DEK from the in-process cache. Required after rotating
+     * wrapped_dek (vault:rotate-dek) so any subsequent read in the SAME
+     * process (a long-lived worker/Octane request, or an in-process test)
+     * re-unwraps under the NEW key instead of serving the stale cached one.
+     */
+    public static function forgetDekCache(string $vaultId): void
+    {
+        unset(self::$dekCache[$vaultId]);
+    }
+
     private static function resolveDek(string $vaultId): string
     {
         /** @var Vault $vault */

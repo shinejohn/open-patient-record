@@ -223,6 +223,119 @@ final class FhirResourceRegistry
         return $def['url'];
     }
 
+    /**
+     * Required-binding value sets (R4 "required" strength only — the codes a
+     * conformant resource MUST draw from) for the plain `code`-typed elements on
+     * the profiles above. Scope note: this deliberately covers only scalar
+     * `code` elements (status/intent/gender) with small, stable required
+     * bindings copied from the base FHIR R4 spec. It does NOT bind
+     * CodeableConcept-valued elements (e.g. Condition.clinicalStatus,
+     * Encounter.class) — those require coding-system-aware slicing logic that
+     * is out of scope here (see class doc comment). An honest subset, not a
+     * terminology server.
+     *
+     * @var array<string, array<string, list<string>>>
+     */
+    private const REQUIRED_BINDINGS = [
+        'Observation' => ['status' => ['registered', 'preliminary', 'final', 'amended', 'corrected', 'cancelled', 'entered-in-error', 'unknown']],
+        'MedicationStatement' => ['status' => ['active', 'completed', 'entered-in-error', 'intended', 'stopped', 'on-hold', 'unknown', 'not-taken']],
+        'MedicationRequest' => [
+            'status' => ['active', 'on-hold', 'cancelled', 'completed', 'entered-in-error', 'stopped', 'draft', 'unknown'],
+            'intent' => ['proposal', 'plan', 'order', 'original-order', 'reflex-order', 'filler-order', 'instance-order', 'option'],
+        ],
+        'AllergyIntolerance' => [],
+        'Immunization' => ['status' => ['completed', 'entered-in-error', 'not-done']],
+        'DiagnosticReport' => ['status' => ['registered', 'partial', 'preliminary', 'final', 'amended', 'corrected', 'appended', 'cancelled', 'entered-in-error', 'unknown']],
+        'Procedure' => ['status' => ['preparation', 'in-progress', 'not-done', 'on-hold', 'stopped', 'completed', 'entered-in-error', 'unknown']],
+        'Encounter' => ['status' => ['planned', 'arrived', 'triaged', 'in-progress', 'onleave', 'finished', 'cancelled', 'entered-in-error', 'unknown']],
+        'DocumentReference' => ['status' => ['current', 'superseded', 'entered-in-error']],
+        'CarePlan' => [
+            'status' => ['draft', 'active', 'on-hold', 'revoked', 'completed', 'entered-in-error', 'unknown'],
+            'intent' => ['proposal', 'plan', 'order', 'option'],
+        ],
+        'Medication' => ['status' => ['active', 'inactive', 'entered-in-error']],
+        'Coverage' => ['status' => ['active', 'cancelled', 'draft', 'entered-in-error']],
+        'ServiceRequest' => [
+            'status' => ['draft', 'active', 'on-hold', 'revoked', 'completed', 'entered-in-error', 'unknown'],
+            'intent' => ['proposal', 'plan', 'directive', 'order', 'original-order', 'reflex-order', 'filler-order', 'instance-order', 'option'],
+        ],
+        'Patient' => ['gender' => ['male', 'female', 'other', 'unknown']],
+    ];
+
+    /**
+     * US Core conformance check — ONLY runs when the client explicitly asserts
+     * a US Core profile for this resource via `meta.profile` (an honest
+     * boundary: silent/absent-profile creates keep the existing presence-level
+     * badge behavior in usCoreProfile() — no profile claimed, no rejection).
+     * When a profile IS asserted, this enforces:
+     *   (a) the profile's required must-support elements are present, and
+     *   (b) the required-binding value sets in REQUIRED_BINDINGS above for
+     *       whichever scalar code fields are present.
+     * Slicing, cardinality beyond 1..1/1..*, and CodeableConcept-valued
+     * required bindings are explicitly OUT of scope (see REQUIRED_BINDINGS doc).
+     *
+     * @param array<string, mixed> $payload
+     * @return list<string> human-readable violations; empty = conformant
+     */
+    private const US_CORE_OBSERVATION_LAB_URL = 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-observation-lab';
+
+    public static function usCoreConformanceViolations(string $type, array $payload): array
+    {
+        $assertedProfiles = $payload['meta']['profile'] ?? [];
+        if (! is_array($assertedProfiles) || $assertedProfiles === []) {
+            return [];
+        }
+
+        $knownProfileUrls = array_merge(array_column(self::US_CORE, 'url'), [self::US_CORE_OBSERVATION_LAB_URL]);
+        $claimsUsCore = array_intersect($assertedProfiles, $knownProfileUrls) !== [];
+        if (! $claimsUsCore) {
+            return [];
+        }
+
+        $violations = [];
+
+        // Observation isn't in US_CORE (it's profile-selected by category, not a
+        // flat extras list — see usCoreProfile()); the lab profile's own must-
+        // support extras are status/category/code, mirrored here.
+        if ($type === 'Observation') {
+            if (in_array(self::US_CORE_OBSERVATION_LAB_URL, $assertedProfiles, true)) {
+                foreach (['status', 'category', 'code'] as $element) {
+                    if (! array_key_exists($element, $payload) || $payload[$element] === null || $payload[$element] === []) {
+                        $violations[] = "Observation.{$element} is required by ".self::US_CORE_OBSERVATION_LAB_URL;
+                    }
+                }
+            }
+            foreach (self::REQUIRED_BINDINGS['Observation'] ?? [] as $field => $allowed) {
+                $value = $payload[$field] ?? null;
+                if (is_string($value) && ! in_array($value, $allowed, true)) {
+                    $violations[] = "Observation.{$field} = '{$value}' is not in the required binding [".implode('|', $allowed).']';
+                }
+            }
+
+            return $violations;
+        }
+
+        $def = self::US_CORE[$type] ?? null;
+        if ($def === null) {
+            return []; // no US Core profile defined for this type at all
+        }
+
+        foreach ($def['extras'] as $element) {
+            if (! array_key_exists($element, $payload) || $payload[$element] === null || $payload[$element] === []) {
+                $violations[] = "{$type}.{$element} is required by ".$def['url'];
+            }
+        }
+
+        foreach (self::REQUIRED_BINDINGS[$type] ?? [] as $field => $allowed) {
+            $value = $payload[$field] ?? null;
+            if (is_string($value) && ! in_array($value, $allowed, true)) {
+                $violations[] = "{$type}.{$field} = '{$value}' is not in the required binding [".implode('|', $allowed).']';
+            }
+        }
+
+        return $violations;
+    }
+
     /** @return array{type: string, paths: list<string>}|null */
     public static function searchParam(string $type, string $param): ?array
     {
