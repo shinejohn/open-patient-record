@@ -28,6 +28,34 @@
         "resourceType": "MedicationStatement", "id": "m-2",
         "status": "active",
         "medicationCodeableConcept": { "text": "Buprenorphine/naloxone (recovery program)" }
+    } },
+    { "resource": {
+        "resourceType": "Procedure", "id": "pr-1",
+        "status": "completed",
+        "code": { "coding": [{ "system": "http://snomed.info/sct", "code": "80146002", "display": "Appendectomy" }], "text": "Appendectomy" }
+    } },
+    { "resource": {
+        "resourceType": "Encounter", "id": "e-1",
+        "status": "finished",
+        "type": [{ "coding": [{ "system": "http://snomed.info/sct", "code": "185349003", "display": "Encounter for check up" }], "text": "Annual physical" }]
+    } },
+    { "resource": {
+        "resourceType": "Observation", "id": "v-1",
+        "status": "final",
+        "category": [{ "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/observation-category", "code": "vital-signs" }] }],
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }], "text": "Systolic BP" },
+        "valueQuantity": { "value": 120, "unit": "mm[Hg]" }
+    } },
+    { "resource": {
+        "resourceType": "Observation", "id": "r-1",
+        "status": "final",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "4548-4", "display": "Hemoglobin A1c" }], "text": "HbA1c" },
+        "valueQuantity": { "value": 6.1, "unit": "%" }
+    } },
+    { "resource": {
+        "resourceType": "DocumentReference", "id": "d-1",
+        "status": "current",
+        "type": { "coding": [{ "system": "http://loinc.org", "code": "34133-9", "display": "Summarization of Episode Note" }], "text": "Continuity of Care Document" }
     } }
   ]
 }

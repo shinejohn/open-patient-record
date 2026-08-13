@@ -21,9 +21,13 @@ final class FhirBundleParser implements Parser
         'AllergyIntolerance' => Candidate::DOMAIN_ALLERGY,
         'Condition' => Candidate::DOMAIN_PROBLEM,
         'Immunization' => Candidate::DOMAIN_IMMUNIZATION,
-        'Observation' => Candidate::DOMAIN_RESULT,
         'DiagnosticReport' => Candidate::DOMAIN_RESULT,
+        'Procedure' => Candidate::DOMAIN_PROCEDURE,
+        'Encounter' => Candidate::DOMAIN_ENCOUNTER,
+        'DocumentReference' => Candidate::DOMAIN_DOCUMENT,
     ];
+
+    private const VITAL_SIGNS_CATEGORY = 'vital-signs';
 
     public function supports(string $content): bool
     {
@@ -55,7 +59,9 @@ final class FhirBundleParser implements Parser
                 continue;
             }
             $type = $resource['resourceType'] ?? null;
-            $domain = self::RESOURCE_DOMAINS[$type] ?? null;
+            $domain = $type === 'Observation'
+                ? $this->observationDomain($resource)
+                : (self::RESOURCE_DOMAINS[$type] ?? null);
             if ($domain === null) {
                 continue; // Patient, Practitioner, etc. — not clinical candidates
             }
@@ -80,6 +86,26 @@ final class FhirBundleParser implements Parser
         }
 
         return $result;
+    }
+
+    /**
+     * A FHIR Observation is a lab RESULT unless its category codes it as
+     * "vital-signs" (US Core / FHIR observation-category), in which case it is
+     * a distinct VITAL domain — same resource type, different clinical meaning.
+     *
+     * @param array<string, mixed> $resource
+     */
+    private function observationDomain(array $resource): string
+    {
+        foreach ($resource['category'] ?? [] as $category) {
+            foreach ($category['coding'] ?? [] as $coding) {
+                if (($coding['code'] ?? null) === self::VITAL_SIGNS_CATEGORY) {
+                    return Candidate::DOMAIN_VITAL;
+                }
+            }
+        }
+
+        return Candidate::DOMAIN_RESULT;
     }
 
     private function sourceName(array $bundle): string

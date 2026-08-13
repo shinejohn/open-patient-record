@@ -125,6 +125,93 @@
         </section>
       </component>
 
+      <component>
+        <section>
+          <code code="47519-4" codeSystem="2.16.840.1.113883.6.1" displayName="Procedures"/>
+          <title>Procedures</title>
+          <text>
+            <table><tbody>
+              <tr><td>Appendectomy, 2024</td></tr>
+              <tr><td>Minor procedure, details not captured</td></tr>
+            </tbody></table>
+          </text>
+          <entry>
+            <procedure classCode="PROC" moodCode="EVN">
+              <code code="80146002" codeSystem="2.16.840.1.113883.6.96" displayName="Appendectomy"/>
+              <effectiveTime value="20240301"/>
+            </procedure>
+          </entry>
+          <entry>
+            <procedure classCode="PROC" moodCode="EVN">
+              <code nullFlavor="UNK"/>
+            </procedure>
+          </entry>
+        </section>
+      </component>
+
+      <component>
+        <section>
+          <code code="46240-8" codeSystem="2.16.840.1.113883.6.1" displayName="Encounters"/>
+          <title>Encounters</title>
+          <entry>
+            <encounter classCode="ENC" moodCode="EVN">
+              <code code="185349003" codeSystem="2.16.840.1.113883.6.96" displayName="Encounter for check up"/>
+              <effectiveTime><low value="20250115"/></effectiveTime>
+            </encounter>
+          </entry>
+        </section>
+      </component>
+
+      <component>
+        <section>
+          <code code="8716-3" codeSystem="2.16.840.1.113883.6.1" displayName="Vital Signs"/>
+          <title>Vital Signs</title>
+          <entry>
+            <organizer>
+              <component>
+                <observation>
+                  <code code="8480-6" codeSystem="2.16.840.1.113883.6.1" displayName="Systolic blood pressure"/>
+                  <value value="120" unit="mm[Hg]"/>
+                </observation>
+              </component>
+              <component>
+                <observation>
+                  <code nullFlavor="UNK"/>
+                </observation>
+              </component>
+            </organizer>
+          </entry>
+        </section>
+      </component>
+
+    </structuredBody>
+  </component>
+  <component>
+    <structuredBody>
+      <component>
+        <section>
+          <code code="55107-7" codeSystem="2.16.840.1.113883.6.1" displayName="Other"/>
+          <entry>
+            <act classCode="ACT" moodCode="EVN">
+              <reference typeCode="REFR">
+                <externalDocument classCode="DOCCLIN" moodCode="EVN">
+                  <code code="18748-4" codeSystem="2.16.840.1.113883.6.1" displayName="Diagnostic Imaging Report"/>
+                  <text><reference value="https://example-imaging.org/reports/98765"/></text>
+                </externalDocument>
+              </reference>
+            </act>
+          </entry>
+          <entry>
+            <act classCode="ACT" moodCode="EVN">
+              <reference typeCode="REFR">
+                <externalDocument classCode="DOCCLIN" moodCode="EVN">
+                  <code nullFlavor="UNK"/>
+                </externalDocument>
+              </reference>
+            </act>
+          </entry>
+        </section>
+      </component>
     </structuredBody>
   </component>
 </ClinicalDocument>

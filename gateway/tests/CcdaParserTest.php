@@ -30,6 +30,76 @@ final class CcdaParserTest extends TestCase
         $this->assertSame(2, $byDomain[Candidate::DOMAIN_PROBLEM]);
         $this->assertSame(1, $byDomain[Candidate::DOMAIN_IMMUNIZATION]);
         $this->assertSame(1, $byDomain[Candidate::DOMAIN_RESULT]);
+        $this->assertSame(1, $byDomain[Candidate::DOMAIN_PROCEDURE]);     // Appendectomy
+        $this->assertSame(1, $byDomain[Candidate::DOMAIN_ENCOUNTER]);     // Office visit
+        $this->assertSame(1, $byDomain[Candidate::DOMAIN_VITAL]);         // Systolic BP
+        // Document domain: the document itself + one identifiable externalDocument.
+        $this->assertSame(2, $byDomain[Candidate::DOMAIN_DOCUMENT]);
+    }
+
+    public function test_procedure_is_extracted_with_validated_snomed_code(): void
+    {
+        $result = $this->ingestFixture();
+        $appendectomy = $this->find($result, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_PROCEDURE);
+
+        $this->assertNotNull($appendectomy);
+        $this->assertSame('Procedure', $appendectomy->resourceType);
+        $this->assertSame(Candidate::CODING_SOURCE, $appendectomy->codingSource);
+        $this->assertSame('80146002', $appendectomy->payload['code']['coding'][0]['code']);
+    }
+
+    public function test_narrative_only_procedure_is_counted_unresolved_not_fabricated(): void
+    {
+        $result = $this->ingestFixture();
+
+        $this->assertSame(1, $result->mentionCounts[Candidate::DOMAIN_PROCEDURE]['unresolved']);
+        $procedures = array_filter($result->candidates, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_PROCEDURE);
+        $this->assertCount(1, $procedures);
+    }
+
+    public function test_encounter_is_extracted(): void
+    {
+        $result = $this->ingestFixture();
+        $encounter = $this->find($result, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_ENCOUNTER);
+
+        $this->assertNotNull($encounter);
+        $this->assertSame('Encounter', $encounter->resourceType);
+        $this->assertSame('185349003', $encounter->payload['type'][0]['coding'][0]['code']);
+        $this->assertSame('2025-01-15', $encounter->payload['period']['start']);
+    }
+
+    public function test_vital_sign_is_extracted_as_distinct_domain_from_results(): void
+    {
+        $result = $this->ingestFixture();
+        $vital = $this->find($result, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_VITAL);
+
+        $this->assertNotNull($vital);
+        $this->assertSame('Observation', $vital->resourceType);
+        $this->assertSame('vital-signs', $vital->payload['category'][0]['coding'][0]['code']);
+        $this->assertSame(120.0, $vital->payload['valueQuantity']['value']);
+        // The unresolvable observation in the same organizer is a mention, not a fabrication.
+        $this->assertSame(1, $result->mentionCounts[Candidate::DOMAIN_VITAL]['unresolved']);
+    }
+
+    public function test_document_self_reference_and_external_document_are_extracted(): void
+    {
+        $result = $this->ingestFixture();
+        $documents = array_values(array_filter($result->candidates, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_DOCUMENT));
+
+        $this->assertCount(2, $documents);
+        $selfDoc = $this->find($result, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_DOCUMENT && ($c->payload['type']['text'] ?? null) === 'Continuity of Care Document');
+        $externalDoc = $this->find($result, fn (Candidate $c) => $c->domain === Candidate::DOMAIN_DOCUMENT && ($c->payload['type']['text'] ?? null) === 'Diagnostic Imaging Report');
+
+        $this->assertNotNull($selfDoc);
+        $this->assertNotNull($externalDoc);
+        $this->assertSame('https://example-imaging.org/reports/98765', $externalDoc->payload['content'][0]['attachment']['url']);
+    }
+
+    public function test_external_document_with_no_identifying_info_is_unresolved_not_fabricated(): void
+    {
+        $result = $this->ingestFixture();
+
+        $this->assertSame(1, $result->mentionCounts[Candidate::DOMAIN_DOCUMENT]['unresolved']);
     }
 
     public function test_validated_source_codes_are_preserved_with_system_uris(): void

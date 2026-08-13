@@ -18,6 +18,10 @@ final class Candidate
     public const DOMAIN_PROBLEM = 'problem';
     public const DOMAIN_IMMUNIZATION = 'immunization';
     public const DOMAIN_RESULT = 'result';
+    public const DOMAIN_PROCEDURE = 'procedure';
+    public const DOMAIN_ENCOUNTER = 'encounter';
+    public const DOMAIN_VITAL = 'vital';
+    public const DOMAIN_DOCUMENT = 'document';
 
     // How the terminology coding was obtained (never "ai-suggested" in G0).
     public const CODING_SOURCE = 'source-coded';   // code present in the source, validated

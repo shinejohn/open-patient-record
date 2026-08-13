@@ -20,7 +20,12 @@ use Opr\Gateway\Terminology;
  *
  * Section LOINC codes drive dispatch:
  *   10160-0 medications · 48765-2 allergies · 11450-4 problems
- *   11369-6 immunizations · 30954-2 results
+ *   11369-6 immunizations · 30954-2 results · 47519-4 procedures
+ *   46240-8 encounters · 8716-3 vital signs
+ *
+ * DOCUMENTS have no C-CDA section of their own: the document itself becomes
+ * one DocumentReference candidate, and any <externalDocument> the document
+ * points to (e.g. a referenced scan or prior note) becomes another.
  */
 final class CcdaParser implements Parser
 {
@@ -32,6 +37,9 @@ final class CcdaParser implements Parser
         '11450-4' => 'parseProblems',
         '11369-6' => 'parseImmunizations',
         '30954-2' => 'parseResults',
+        '47519-4' => 'parseProcedures',
+        '46240-8' => 'parseEncounters',
+        '8716-3' => 'parseVitals',
     ];
 
     public function supports(string $content): bool
@@ -76,6 +84,8 @@ final class CcdaParser implements Parser
                 $this->{$handler}($xp, $entry, $result, $org, $i);
             }
         }
+
+        $this->parseDocuments($xp, $doc, $result, $org);
 
         return $result;
     }
@@ -201,6 +211,131 @@ final class CcdaParser implements Parser
             }
 
             $this->emit($r, Candidate::DOMAIN_RESULT, 'Observation', $payload, $system, $code, $org, "result[{$i}.{$j}]", $text);
+        }
+    }
+
+    private function parseProcedures(DOMXPath $xp, DOMElement $entry, IngestionResult $r, string $org, int $i): void
+    {
+        $node = $xp->query('.//h:procedure/h:code', $entry)->item(0);
+        [$system, $code] = $this->codeAndSystem($xp, $node);
+        $text = $node instanceof DOMElement ? ($node->getAttribute('displayName') ?: $this->originalTextRef($xp, $node)) : null;
+
+        if ($text === null && $code === null) {
+            $r->noteUnextractedMention(Candidate::DOMAIN_PROCEDURE); // narrative-only procedure
+            return;
+        }
+
+        $payload = [
+            'resourceType' => 'Procedure',
+            'status' => 'completed',
+            'code' => Terminology::codeableConcept($system, $code, $text),
+        ];
+        if (($performed = $this->text($xp, './/h:procedure/h:effectiveTime/@value', $entry)) !== null) {
+            $payload['performedDateTime'] = $this->fhirDate($performed);
+        }
+
+        $this->emit($r, Candidate::DOMAIN_PROCEDURE, 'Procedure', $payload, $system, $code, $org, "procedure[{$i}]", $text);
+    }
+
+    private function parseEncounters(DOMXPath $xp, DOMElement $entry, IngestionResult $r, string $org, int $i): void
+    {
+        $node = $xp->query('.//h:encounter/h:code', $entry)->item(0);
+        [$system, $code] = $this->codeAndSystem($xp, $node);
+        $text = $node instanceof DOMElement ? ($node->getAttribute('displayName') ?: $this->originalTextRef($xp, $node)) : null;
+
+        if ($text === null && $code === null) {
+            $r->noteUnextractedMention(Candidate::DOMAIN_ENCOUNTER); // narrative-only encounter
+            return;
+        }
+
+        $payload = [
+            'resourceType' => 'Encounter',
+            'status' => 'finished',
+            'type' => [Terminology::codeableConcept($system, $code, $text)],
+        ];
+        if (($start = $this->text($xp, './/h:encounter/h:effectiveTime/h:low/@value', $entry)) !== null) {
+            $payload['period'] = ['start' => $this->fhirDate($start)];
+        }
+
+        $this->emit($r, Candidate::DOMAIN_ENCOUNTER, 'Encounter', $payload, $system, $code, $org, "encounter[{$i}]", $text);
+    }
+
+    private function parseVitals(DOMXPath $xp, DOMElement $entry, IngestionResult $r, string $org, int $i): void
+    {
+        foreach ($xp->query('.//h:observation', $entry) as $j => $obs) {
+            $node = $xp->query('./h:code', $obs)->item(0);
+            [$system, $code] = $this->codeAndSystem($xp, $node);
+            $text = $node instanceof DOMElement ? ($node->getAttribute('displayName') ?: null) : null;
+
+            if ($text === null && $code === null) {
+                $r->noteUnextractedMention(Candidate::DOMAIN_VITAL);
+                continue;
+            }
+
+            $payload = [
+                'resourceType' => 'Observation',
+                'status' => 'final',
+                'category' => [['coding' => [['system' => 'http://terminology.hl7.org/CodeSystem/observation-category', 'code' => 'vital-signs']]]],
+                'code' => Terminology::codeableConcept($system, $code, $text),
+            ];
+            $valueNode = $xp->query('./h:value', $obs)->item(0);
+            if ($valueNode instanceof DOMElement) {
+                $val = $valueNode->getAttribute('value');
+                $unit = $valueNode->getAttribute('unit');
+                if ($val !== '') {
+                    $payload['valueQuantity'] = ['value' => (float) $val] + ($unit !== '' ? ['unit' => $unit] : []);
+                }
+            }
+
+            $this->emit($r, Candidate::DOMAIN_VITAL, 'Observation', $payload, $system, $code, $org, "vital[{$i}.{$j}]", $text);
+        }
+    }
+
+    /**
+     * DOCUMENTS have no C-CDA section: the document itself is one
+     * DocumentReference candidate, and any <externalDocument> it references
+     * (e.g. a prior note or imaging report held elsewhere) is another. A
+     * referenced document with neither an id nor a code/title is an
+     * unresolved mention — never fabricated into a coded fact.
+     */
+    private function parseDocuments(DOMXPath $xp, DOMDocument $doc, IngestionResult $r, string $org): void
+    {
+        $root = $doc->documentElement;
+        if ($root instanceof DOMElement) {
+            $codeNode = $xp->query('/h:ClinicalDocument/h:code')->item(0);
+            [$system, $code] = $this->codeAndSystem($xp, $codeNode);
+            $title = $this->text($xp, '/h:ClinicalDocument/h:title', null);
+            $text = $title ?? ($codeNode instanceof DOMElement ? $codeNode->getAttribute('displayName') : null);
+
+            $payload = [
+                'resourceType' => 'DocumentReference',
+                'status' => 'current',
+                'type' => Terminology::codeableConcept($system, $code, $text),
+            ];
+
+            $this->emit($r, Candidate::DOMAIN_DOCUMENT, 'DocumentReference', $payload, $system, $code, $org, 'document[self]', $text);
+        }
+
+        foreach ($xp->query('//h:externalDocument') as $i => $extDoc) {
+            $codeNode = $xp->query('./h:code', $extDoc)->item(0);
+            [$system, $code] = $this->codeAndSystem($xp, $codeNode);
+            $text = $codeNode instanceof DOMElement ? ($codeNode->getAttribute('displayName') ?: $this->originalTextRef($xp, $codeNode)) : null;
+
+            if ($text === null && $code === null) {
+                $r->noteUnextractedMention(Candidate::DOMAIN_DOCUMENT); // referenced document with no identifying info
+                continue;
+            }
+
+            $payload = [
+                'resourceType' => 'DocumentReference',
+                'status' => 'current',
+                'type' => Terminology::codeableConcept($system, $code, $text),
+            ];
+            if (($url = $this->text($xp, './h:text/h:reference/@value', $extDoc)) !== null) {
+                $payload['content'] = [['attachment' => ['url' => $url]]];
+            }
+
+            $this->emit($r, Candidate::DOMAIN_DOCUMENT, 'DocumentReference', $payload, $system, $code, $org, "document[external.{$i}]", $text);
         }
     }
 
