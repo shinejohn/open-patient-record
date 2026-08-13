@@ -73,6 +73,32 @@ final class SmartService
     }
 
     /**
+     * Map SMART Backend Services scopes (`system/{Type|*}.read`, the Bulk Data
+     * v1 `.rs` alias also accepted) -> resource-type scope. Write is rejected,
+     * same as the standalone surface — this is the read-only v1 backend surface.
+     *
+     * @return array<string>
+     */
+    public function parseSystemScopes(string $scopeString): array
+    {
+        $resourceTypes = [];
+
+        foreach (preg_split('/\s+/', trim($scopeString), flags: PREG_SPLIT_NO_EMPTY) as $scope) {
+            if (preg_match('#\Asystem/(\*|[A-Z][A-Za-z0-9]*)\.(read|rs)\z#', $scope, $m) === 1) {
+                $resourceTypes[] = $m[1];
+            } else {
+                throw new InvalidArgumentException("unsupported scope: {$scope}");
+            }
+        }
+
+        if ($resourceTypes === []) {
+            throw new InvalidArgumentException('no system scopes requested');
+        }
+
+        return in_array('*', $resourceTypes, true) ? ['*'] : array_values(array_unique($resourceTypes));
+    }
+
+    /**
      * Consent approval: mint the grant and a single-use auth code bound to the
      * client, redirect URI, and PKCE challenge.
      *
@@ -188,6 +214,67 @@ final class SmartService
 
             return $this->issueTokens($grant, $client, wantsIdToken: false);
         });
+    }
+
+    /**
+     * Mint an unattended-access token for a SMART Backend Services client
+     * against the given AccessGrant. No refresh token (the client re-attests
+     * with a fresh signed assertion instead of holding a long-lived secret) and
+     * no id_token (there is no end-user identity — Backend Services is purely
+     * system-to-system).
+     *
+     * @return array<string, mixed>
+     */
+    public function issueSystemToken(AccessGrant $grant): array
+    {
+        $subject = $grant->vault->subject;
+        $expiresAt = now()->addMinutes(self::ACCESS_TTL_MINUTES);
+
+        $access = $subject->createToken(
+            "grant:{$grant->id}",
+            array_merge(["grant:{$grant->id}", "vault:{$grant->vault_id}", "purpose:{$grant->purpose}"], $grant->permissions),
+            $expiresAt,
+        );
+
+        return [
+            'access_token' => $access->plainTextToken,
+            'token_type' => 'Bearer',
+            'expires_in' => self::ACCESS_TTL_MINUTES * 60,
+            'scope' => implode(' ', array_map(
+                fn (string $t) => "system/{$t}.read",
+                $grant->scope,
+            )),
+        ];
+    }
+
+    /**
+     * Mint the AccessGrant a backend client's token derives from — same
+     * grant/revocation/audit model as every other credential in this system.
+     *
+     * @param array<string> $resourceScopes
+     */
+    public function mintSystemGrant(Vault $vault, object $backendClient, array $resourceScopes): AccessGrant
+    {
+        $grant = AccessGrant::query()->create([
+            'vault_id' => $vault->id,
+            'pseudo_id' => bin2hex(random_bytes(16)),
+            'otp_hash' => Hash::make(bin2hex(random_bytes(32))), // never OTP-redeemable
+            'purpose' => 'operations',
+            'scope' => $resourceScopes,
+            'permissions' => ['read'],
+            'sensitive_categories' => [], // default-off, exactly like the standalone flow
+            'expires_at' => now()->addMinutes(self::ACCESS_TTL_MINUTES),
+            'max_uses' => 2_000_000_000,
+        ]);
+
+        $this->audit->record($vault, 'grant.minted', grant: $grant, context: [
+            'surface' => 'smart-backend-services',
+            'backend_client_id' => $backendClient->id,
+            'backend_client_name' => $backendClient->name,
+            'scope' => $resourceScopes,
+        ]);
+
+        return $grant;
     }
 
     /** @return array<string, mixed> */

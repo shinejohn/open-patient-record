@@ -82,6 +82,11 @@ final class Vault extends Model
         return $this->hasMany(VaultDelegate::class);
     }
 
+    public function backendClients(): HasMany
+    {
+        return $this->hasMany(BackendClient::class);
+    }
+
     public function isSubject(User $user): bool
     {
         return $this->subject_user_id === $user->id;

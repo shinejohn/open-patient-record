@@ -50,6 +50,9 @@ final class FhirResourceRegistry
         'Encounter' => ['required' => ['status', 'class'], 'choices' => []],
         'DocumentReference' => ['required' => ['status', 'content'], 'choices' => []],
         'CarePlan' => ['required' => ['status', 'intent', 'subject'], 'choices' => []],
+        'Medication' => ['required' => [], 'choices' => []],
+        'Coverage' => ['required' => ['status', 'beneficiary', 'payor'], 'choices' => []],
+        'ServiceRequest' => ['required' => ['status', 'intent', 'subject'], 'choices' => []],
     ];
 
     /**
@@ -131,6 +134,22 @@ final class FhirResourceRegistry
             'patient' => ['type' => 'reference', 'paths' => ['subject']],
             'date' => ['type' => 'date', 'paths' => ['period.start']],
         ],
+        'Medication' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+        ],
+        'Coverage' => [
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'patient' => ['type' => 'reference', 'paths' => ['beneficiary']],
+            'payor' => ['type' => 'reference', 'paths' => ['payor.0']],
+        ],
+        'ServiceRequest' => [
+            'code' => ['type' => 'token', 'paths' => ['code']],
+            'status' => ['type' => 'token', 'paths' => ['status']],
+            'intent' => ['type' => 'token', 'paths' => ['intent']],
+            'patient' => ['type' => 'reference', 'paths' => ['subject']],
+            'authored' => ['type' => 'date', 'paths' => ['authoredOn']],
+        ],
         'Patient' => [],
     ];
 
@@ -162,6 +181,9 @@ final class FhirResourceRegistry
         'DiagnosticReport' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-diagnosticreport-lab', 'extras' => ['category']],
         'DocumentReference' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-documentreference', 'extras' => ['type']],
         'CarePlan' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-careplan', 'extras' => ['category']],
+        'Medication' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-medication', 'extras' => ['code']],
+        'Coverage' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-coverage', 'extras' => []],
+        'ServiceRequest' => ['url' => 'http://hl7.org/fhir/us/core/StructureDefinition/us-core-servicerequest', 'extras' => ['code']],
     ];
 
     /**

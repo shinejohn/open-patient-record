@@ -58,6 +58,11 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/vaults/{vault}/delegates', [DelegateController::class, 'store']);
     Route::post('/vaults/{vault}/delegates/{delegate}/revoke', [DelegateController::class, 'revoke']);
 
+    // SMART Backend Services client registration (system-to-system).
+    Route::get('/vaults/{vault}/backend-clients', [\App\Http\Controllers\BackendClientController::class, 'index']);
+    Route::post('/vaults/{vault}/backend-clients', [\App\Http\Controllers\BackendClientController::class, 'store']);
+    Route::post('/vaults/{vault}/backend-clients/{client}/revoke', [\App\Http\Controllers\BackendClientController::class, 'revoke']);
+
     Route::get('/vaults/{vault}/witness-proof', [VaultController::class, 'witnessProof']);
 });
 

@@ -293,4 +293,106 @@ final class FhirWriteTest extends TestCase
         $this->assertContains('create', $interactions);
         $this->assertContains('search-type', $interactions);
     }
+
+    public function test_capability_statement_includes_medication_coverage_and_servicerequest(): void
+    {
+        $metadata = $this->getJson('/api/fhir/metadata')->assertOk();
+        $types = array_column($metadata->json('rest.0.resource'), 'type');
+
+        foreach (['Medication', 'Coverage', 'ServiceRequest'] as $expected) {
+            $this->assertContains($expected, $types);
+        }
+    }
+
+    public function test_medication_is_created_and_read_and_us_core_stamped(): void
+    {
+        $s = $this->subjectWithVault();
+
+        $created = $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/Medication", [
+                'resourceType' => 'Medication',
+                'code' => ['text' => 'Metformin 500mg'],
+                'status' => 'active',
+            ])
+            ->assertCreated();
+
+        $this->assertSame('Medication', $created->json('resourceType'));
+        $profiles = $created->json('meta.profile') ?? [];
+        $this->assertContains('http://hl7.org/fhir/us/core/StructureDefinition/us-core-medication', $profiles);
+
+        $this->withToken($s['token'])
+            ->getJson("/api/fhir/{$s['vault_id']}/Medication/{$created->json('id')}")
+            ->assertOk()
+            ->assertJsonPath('resourceType', 'Medication');
+    }
+
+    public function test_medication_update_and_delete_are_rejected_append_only(): void
+    {
+        $s = $this->subjectWithVault();
+
+        $created = $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/Medication", [
+                'resourceType' => 'Medication',
+                'code' => ['text' => 'Metformin 500mg'],
+            ])
+            ->assertCreated();
+        $id = $created->json('id');
+
+        $this->withToken($s['token'])
+            ->putJson("/api/fhir/{$s['vault_id']}/Medication/{$id}", ['resourceType' => 'Medication'])
+            ->assertStatus(405);
+        $this->withToken($s['token'])
+            ->deleteJson("/api/fhir/{$s['vault_id']}/Medication/{$id}")
+            ->assertStatus(405);
+    }
+
+    public function test_coverage_requires_beneficiary_and_payor(): void
+    {
+        $s = $this->subjectWithVault();
+
+        $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/Coverage", [
+                'resourceType' => 'Coverage',
+                'status' => 'active',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('resourceType', 'OperationOutcome');
+
+        $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/Coverage", [
+                'resourceType' => 'Coverage',
+                'status' => 'active',
+                'beneficiary' => ['reference' => "Patient/{$s['vault_id']}"],
+                'payor' => [['display' => 'Acme Health Plan']],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('resourceType', 'Coverage');
+    }
+
+    public function test_servicerequest_requires_status_intent_and_subject(): void
+    {
+        $s = $this->subjectWithVault();
+
+        $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/ServiceRequest", [
+                'resourceType' => 'ServiceRequest',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('resourceType', 'OperationOutcome');
+
+        $created = $this->withToken($s['token'])
+            ->postJson("/api/fhir/{$s['vault_id']}/ServiceRequest", [
+                'resourceType' => 'ServiceRequest',
+                'status' => 'active',
+                'intent' => 'order',
+                'subject' => ['reference' => "Patient/{$s['vault_id']}"],
+                'code' => ['text' => 'Chest X-ray'],
+            ])
+            ->assertCreated();
+
+        $this->assertContains(
+            'http://hl7.org/fhir/us/core/StructureDefinition/us-core-servicerequest',
+            $created->json('meta.profile') ?? [],
+        );
+    }
 }
